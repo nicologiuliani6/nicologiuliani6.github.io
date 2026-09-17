@@ -1,17 +1,81 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Nicolo Giuliani</title>
+<title>Nicolò Giuliani</title>
 <style>
-  :root{color-scheme:light dark}
-  body{font-family:system-ui,sans-serif;max-width:40rem;margin:4rem auto;padding:0 1rem;line-height:1.5}
-  h1{font-size:1.5rem}
+  :root{
+    --bg:#ffffff; --fg:#1a1a1a; --muted:#5c5c5c; --line:#e5e5e5; --accent:#2563eb;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#111214; --fg:#e8e8e8; --muted:#9a9a9a; --line:#2a2b2e; --accent:#6ea8fe; }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    line-height:1.55;
+  }
+  main{max-width:640px; margin:0 auto; padding:3rem 1.25rem 4rem}
+  h1{font-size:1.6rem; margin:0 0 .2rem}
+  .tagline{color:var(--muted); margin:0 0 2rem; font-size:1rem}
+  h2{font-size:.85rem; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:2.2rem 0 .8rem}
+  a{color:var(--accent); text-decoration:none}
+  a:hover{text-decoration:underline}
+  ul{margin:0; padding-left:1.1rem}
+  li{margin-bottom:.3rem}
+  .project{border-bottom:1px solid var(--line); padding-bottom:1rem; margin-bottom:1rem}
+  .project:last-child{border-bottom:none}
+  .project h3{font-size:1rem; margin:0 0 .2rem}
+  .project .stack{color:var(--muted); font-size:.85rem; margin:0 0 .4rem}
+  .project p{margin:0; font-size:.92rem}
+  .links{display:flex; gap:1rem; flex-wrap:wrap; font-size:.92rem}
+  footer{margin-top:3rem; color:var(--muted); font-size:.8rem}
 </style>
 </head>
 <body>
-<h1>nicologiuliani.site</h1>
-<p>Sito in costruzione.</p>
+<main>
+  <h1>Nicolò Giuliani</h1>
+  <p class="tagline">CS student @ University of Bologna — systems, infra, low-level.</p>
+
+  <div class="links">
+    <a href="mailto:nicolo.giuliani6@studio.unibo.it">Email</a>
+    <a href="https://github.com/nicologiuliani6">GitHub</a>
+  </div>
+
+  <h2>About</h2>
+  <p>B.Sc. Computer Science (expected 2027), University of Bologna. HPC curricular intern at CINECA.
+  Thesis on reversible concurrent programming, advised by Prof. Ivan Lanese.</p>
+
+  <h2>Skills</h2>
+  <ul>
+    <li><strong>Languages:</strong> C, C++, Python, Bash</li>
+    <li><strong>Systems:</strong> Linux/BSD, Linux kernel development, Kubernetes, Docker, Ansible, KVM/QEMU, Proxmox, Ceph, ZFS, systemd, MikroTik RouterOS</li>
+    <li><strong>Theory:</strong> Structural Operational Semantics, Automata &amp; Formal Language Theory, Linear/Integer Programming, Reversible Computing</li>
+  </ul>
+
+  <h2>Projects</h2>
+
+  <div class="project">
+    <h3>Kairos</h3>
+    <p class="stack">Reversible concurrent language — C, Python, Formal Semantics</p>
+    <p>Designed a reversible concurrent language with SOS semantics (rendezvous channels, parallelism, try/rollback). Built KairosVM: Python front-end (lexer, LALR(1) parser) + C bytecode interpreter with bidirectional execution. Case study: reversible Burrows-Wheeler transform.</p>
+  </div>
+
+  <div class="project">
+    <h3>cavium-cn6640-snic10e-octeon-ii-nic</h3>
+    <p class="stack">C, Linux Kernel, PCIe, Reverse Engineering</p>
+    <p>Out-of-tree Linux driver stack for the Cavium CN6640 SNIC10E card, exposing it as two 10GbE interfaces via a reverse-engineered PCIe BAR2 datapath — no vendor firmware NDA. Line-rate 10GbE TX (9.7–9.8 Gb/s), 8.1–8.8 Gb/s RX, automatic boot, no serial console.</p>
+  </div>
+
+  <div class="project">
+    <h3>Homelab Infrastructure</h3>
+    <p class="stack">Proxmox, Ceph, MikroTik RouterOS, ZFS</p>
+    <p>Five-node Proxmox cluster with Ceph as distributed storage backend for self-hosted services.</p>
+  </div>
+
+  <footer>nicologiuliani.site</footer>
+</main>
 </body>
 </html>
