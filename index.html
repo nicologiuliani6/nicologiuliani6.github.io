@@ -17,68 +17,139 @@
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
     line-height:1.55;
   }
-  main{max-width:640px; margin:0 auto; padding:3rem 1.25rem 4rem}
-  h1{font-size:1.6rem; margin:0 0 .2rem}
-  .tagline{color:var(--muted); margin:0 0 2rem; font-size:1rem}
-  h2{font-size:.85rem; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:2.2rem 0 .8rem}
+  main{max-width:680px; margin:0 auto; padding:3rem 1.25rem 4rem}
+  header{margin-bottom:2.5rem}
+  h1{font-size:1.7rem; margin:0 0 .2rem}
+  .tagline{color:var(--muted); margin:0 0 1rem; font-size:1rem}
+  nav{display:flex; gap:1.1rem; flex-wrap:wrap; font-size:.88rem; border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:.7rem 0}
+  nav a{color:var(--muted)}
+  nav a:hover{color:var(--accent)}
+  section{margin:2.6rem 0}
+  section > h2{font-size:.8rem; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); margin:0 0 1.1rem}
   a{color:var(--accent); text-decoration:none}
   a:hover{text-decoration:underline}
   ul{margin:0; padding-left:1.1rem}
-  li{margin-bottom:.3rem}
-  .project{border-bottom:1px solid var(--line); padding-bottom:1rem; margin-bottom:1rem}
-  .project:last-child{border-bottom:none}
+  li{margin-bottom:.35rem}
+
+  .entry{margin-bottom:1.3rem}
+  .entry:last-child{margin-bottom:0}
+  .entry-head{display:flex; justify-content:space-between; align-items:baseline; gap:1rem; flex-wrap:wrap}
+  .entry-head h3{font-size:.98rem; margin:0}
+  .entry-head .where{color:var(--muted); font-size:.85rem}
+  .entry ul{margin-top:.35rem; font-size:.92rem}
+
+  .project{border-bottom:1px solid var(--line); padding-bottom:1.1rem; margin-bottom:1.1rem}
+  .project:last-child{border-bottom:none; padding-bottom:0}
   .project h3{font-size:1rem; margin:0 0 .2rem}
   .project h3 a{color:inherit}
   .project .stack{color:var(--muted); font-size:.85rem; margin:0 0 .4rem}
   .project p{margin:0; font-size:.92rem}
-  .project .repo-link{display:inline-block; margin-top:.4rem; font-size:.85rem}
-  .links{display:flex; gap:1rem; flex-wrap:wrap; font-size:.92rem}
+  .project .repo-link{display:inline-block; margin-top:.45rem; font-size:.85rem}
+
+  .skill-group{margin-bottom:.7rem; font-size:.92rem}
+  .skill-group:last-child{margin-bottom:0}
+  .skill-group strong{color:var(--muted); font-weight:600; display:block; font-size:.8rem; text-transform:uppercase; letter-spacing:.05em; margin-bottom:.25rem}
+
+  .contact-list{display:flex; flex-direction:column; gap:.4rem; font-size:.95rem}
+
   footer{margin-top:3rem; color:var(--muted); font-size:.8rem}
 </style>
 </head>
 <body>
 <main>
-  <h1>Nicolò Giuliani</h1>
-  <p class="tagline">CS student @ University of Bologna — systems, infra, low-level.</p>
+  <header>
+    <h1>Nicolò Giuliani</h1>
+    <p class="tagline">CS student @ University of Bologna — systems, infra, low-level.</p>
+    <nav>
+      <a href="#education">Education &amp; Publications</a>
+      <a href="#experience">Experience</a>
+      <a href="#projects">Projects</a>
+      <a href="#skills">Skills</a>
+      <a href="#contact">Contact</a>
+    </nav>
+  </header>
 
-  <div class="links">
-    <a href="mailto:nicolo.giuliani6@studio.unibo.it">Email</a>
-    <a href="https://github.com/nicologiuliani6">GitHub</a>
-    <a href="/kairos-thesis/tesi.pdf">Thesis (PDF)</a>
-  </div>
+  <section id="education">
+    <h2>Education &amp; Publications</h2>
+    <div class="entry">
+      <div class="entry-head">
+        <h3>University of Bologna</h3>
+        <span class="where">Bologna, Italy</span>
+      </div>
+      <p style="margin:.2rem 0 0; font-size:.92rem">B.Sc. in Computer Science — expected graduation July 2027</p>
+      <ul>
+        <li>Relevant coursework: Data Structures and Algorithms, Operating Systems, Computer Networks, Programming Languages, Computer Architecture, Combinatorial Optimisation, Probability Calculus and Statistics, Logic for Computer Science</li>
+        <li>Thesis: reversible concurrent programming, advised by Prof. Ivan Lanese (coordinator of a Marie Curie network) — <a href="/kairos-thesis/tesi.pdf">PDF</a> · <a href="https://github.com/nicologiuliani6/kairos-thesis">source</a></li>
+      </ul>
+    </div>
+  </section>
 
-  <h2>About</h2>
-  <p>B.Sc. Computer Science (expected 2027), University of Bologna. HPC curricular intern at CINECA.
-  Thesis on reversible concurrent programming, advised by Prof. Ivan Lanese.</p>
+  <section id="experience">
+    <h2>Experience</h2>
+    <div class="entry">
+      <div class="entry-head">
+        <h3>CINECA — HPC Curricular Intern</h3>
+        <span class="where">Sep 2026 – Oct 2026</span>
+      </div>
+      <ul>
+        <li>Project: Infrastructure, Lifecycle Management and Security Hardening for HPC Services via Kubernetes</li>
+        <li>Replicated a production Kubernetes cluster used to orchestrate HPC support services as a digital twin on Cineca's private cloud, using IaC tooling (Ansible)</li>
+        <li>Ran infrastructure-level security benchmarks (CIS) on the digital twin and tested lifecycle and backup-recovery procedures</li>
+      </ul>
+    </div>
+  </section>
 
-  <h2>Skills</h2>
-  <ul>
-    <li><strong>Languages:</strong> C, C++, Python, Bash</li>
-    <li><strong>Systems:</strong> Linux/BSD, Linux kernel development, Kubernetes, Docker, Ansible, KVM/QEMU, Proxmox, Ceph, ZFS, systemd, MikroTik RouterOS</li>
-    <li><strong>Theory:</strong> Structural Operational Semantics, Automata &amp; Formal Language Theory, Linear/Integer Programming, Reversible Computing</li>
-  </ul>
+  <section id="projects">
+    <h2>Projects</h2>
 
-  <h2>Projects</h2>
+    <div class="project">
+      <h3><a href="https://github.com/nicologiuliani6/kairos">Kairos</a></h3>
+      <p class="stack">Reversible concurrent language — C, Python, Formal Semantics · BSc Thesis</p>
+      <p>Designed a reversible concurrent language with SOS semantics (rendezvous channels, parallelism, try/rollback). Built KairosVM: Python front-end (lexer, LALR(1) parser) + C bytecode interpreter with bidirectional execution. Case study: reversible Burrows-Wheeler transform.</p>
+      <a class="repo-link" href="https://github.com/nicologiuliani6/kairos">→ source</a>
+    </div>
 
-  <div class="project">
-    <h3><a href="https://github.com/nicologiuliani6/kairos">Kairos</a></h3>
-    <p class="stack">Reversible concurrent language — C, Python, Formal Semantics</p>
-    <p>Designed a reversible concurrent language with SOS semantics (rendezvous channels, parallelism, try/rollback). Built KairosVM: Python front-end (lexer, LALR(1) parser) + C bytecode interpreter with bidirectional execution. Case study: reversible Burrows-Wheeler transform.</p>
-    <a class="repo-link" href="https://github.com/nicologiuliani6/kairos">→ source</a>
-  </div>
+    <div class="project">
+      <h3><a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">cavium-cn6640-snic10e-octeon-ii-nic</a></h3>
+      <p class="stack">C, Linux Kernel, PCIe, Reverse Engineering</p>
+      <p>Out-of-tree Linux driver stack for the Cavium CN6640 SNIC10E card, exposing it as two 10GbE interfaces via a reverse-engineered PCIe BAR2 datapath — no vendor firmware NDA. Line-rate 10GbE TX (9.7–9.8 Gb/s), 8.1–8.8 Gb/s RX, automatic boot, no serial console.</p>
+      <a class="repo-link" href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">→ source</a>
+    </div>
 
-  <div class="project">
-    <h3><a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">cavium-cn6640-snic10e-octeon-ii-nic</a></h3>
-    <p class="stack">C, Linux Kernel, PCIe, Reverse Engineering</p>
-    <p>Out-of-tree Linux driver stack for the Cavium CN6640 SNIC10E card, exposing it as two 10GbE interfaces via a reverse-engineered PCIe BAR2 datapath — no vendor firmware NDA. Line-rate 10GbE TX (9.7–9.8 Gb/s), 8.1–8.8 Gb/s RX, automatic boot, no serial console.</p>
-    <a class="repo-link" href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">→ source</a>
-  </div>
+    <div class="project">
+      <h3>Homelab Infrastructure</h3>
+      <p class="stack">Proxmox, Ceph, MikroTik RouterOS, ZFS</p>
+      <p>Built and maintain a five-node Proxmox cluster with Ceph as the distributed storage backend for self-hosted services.</p>
+    </div>
+  </section>
 
-  <div class="project">
-    <h3>Homelab Infrastructure</h3>
-    <p class="stack">Proxmox, Ceph, MikroTik RouterOS, ZFS</p>
-    <p>Five-node Proxmox cluster with Ceph as distributed storage backend for self-hosted services.</p>
-  </div>
+  <section id="skills">
+    <h2>Skills</h2>
+    <div class="skill-group">
+      <strong>Languages</strong>
+      C, C++, Python, Bash
+    </div>
+    <div class="skill-group">
+      <strong>Systems &amp; Infrastructure</strong>
+      Linux/BSD, Linux kernel development, Kubernetes, Docker, Ansible, KVM/QEMU, Proxmox, Ceph, ZFS, systemd, Git, MikroTik RouterOS, CIS security hardening
+    </div>
+    <div class="skill-group">
+      <strong>Theory</strong>
+      Structural Operational Semantics, Automata Theory, Formal Language Theory, Linear/Integer Programming, Network Flow Algorithms, Reversible Computing (Janus)
+    </div>
+    <div class="skill-group">
+      <strong>Languages Spoken</strong>
+      Italian (native), English (B2), French (A2)
+    </div>
+  </section>
+
+  <section id="contact">
+    <h2>Contact</h2>
+    <div class="contact-list">
+      <a href="mailto:nicolo.giuliani6@studio.unibo.it">nicolo.giuliani6@studio.unibo.it</a>
+      <a href="https://github.com/nicologiuliani6">github.com/nicologiuliani6</a>
+    </div>
+  </section>
 
   <footer>nicologiuliani.site</footer>
 </main>
