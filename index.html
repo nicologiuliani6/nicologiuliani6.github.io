@@ -28,8 +28,10 @@
   .project{border-bottom:1px solid var(--line); padding-bottom:1rem; margin-bottom:1rem}
   .project:last-child{border-bottom:none}
   .project h3{font-size:1rem; margin:0 0 .2rem}
+  .project h3 a{color:inherit}
   .project .stack{color:var(--muted); font-size:.85rem; margin:0 0 .4rem}
   .project p{margin:0; font-size:.92rem}
+  .project .repo-link{display:inline-block; margin-top:.4rem; font-size:.85rem}
   .links{display:flex; gap:1rem; flex-wrap:wrap; font-size:.92rem}
   footer{margin-top:3rem; color:var(--muted); font-size:.8rem}
 </style>
@@ -42,6 +44,7 @@
   <div class="links">
     <a href="mailto:nicolo.giuliani6@studio.unibo.it">Email</a>
     <a href="https://github.com/nicologiuliani6">GitHub</a>
+    <a href="https://github.com/nicologiuliani6/kairos-thesis">Thesis (in progress)</a>
   </div>
 
   <h2>About</h2>
@@ -58,15 +61,17 @@
   <h2>Projects</h2>
 
   <div class="project">
-    <h3>Kairos</h3>
+    <h3><a href="https://github.com/nicologiuliani6/kairos">Kairos</a></h3>
     <p class="stack">Reversible concurrent language — C, Python, Formal Semantics</p>
     <p>Designed a reversible concurrent language with SOS semantics (rendezvous channels, parallelism, try/rollback). Built KairosVM: Python front-end (lexer, LALR(1) parser) + C bytecode interpreter with bidirectional execution. Case study: reversible Burrows-Wheeler transform.</p>
+    <a class="repo-link" href="https://github.com/nicologiuliani6/kairos">→ source</a>
   </div>
 
   <div class="project">
-    <h3>cavium-cn6640-snic10e-octeon-ii-nic</h3>
+    <h3><a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">cavium-cn6640-snic10e-octeon-ii-nic</a></h3>
     <p class="stack">C, Linux Kernel, PCIe, Reverse Engineering</p>
     <p>Out-of-tree Linux driver stack for the Cavium CN6640 SNIC10E card, exposing it as two 10GbE interfaces via a reverse-engineered PCIe BAR2 datapath — no vendor firmware NDA. Line-rate 10GbE TX (9.7–9.8 Gb/s), 8.1–8.8 Gb/s RX, automatic boot, no serial console.</p>
+    <a class="repo-link" href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">→ source</a>
   </div>
 
   <div class="project">
