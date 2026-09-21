@@ -1,0 +1,80 @@
+:root{
+  --bg:#ffffff; --fg:#1a1a1a; --muted:#5c5c5c; --line:#e5e5e5; --accent:#2563eb;
+  --code-bg:#f5f5f5;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#111214; --fg:#e8e8e8; --muted:#9a9a9a; --line:#2a2b2e; --accent:#6ea8fe; --code-bg:#1b1c1f; }
+}
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  line-height:1.55;
+}
+main{max-width:680px; margin:0 auto; padding:3rem 1.25rem 4rem}
+header{margin-bottom:2.5rem}
+h1{font-size:1.7rem; margin:0 0 .2rem}
+.tagline{color:var(--muted); margin:0 0 1rem; font-size:1rem}
+nav{display:flex; gap:1.1rem; flex-wrap:wrap; font-size:.88rem; border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:.7rem 0}
+nav a{color:var(--muted)}
+nav a:hover{color:var(--accent)}
+section{margin:2.6rem 0}
+section > h2{font-size:.8rem; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); margin:0 0 1.1rem}
+a{color:var(--accent); text-decoration:none}
+a:hover{text-decoration:underline}
+ul{margin:0; padding-left:1.1rem}
+li{margin-bottom:.35rem}
+
+.entry{margin-bottom:1.3rem}
+.entry:last-child{margin-bottom:0}
+.entry-head{display:flex; justify-content:space-between; align-items:baseline; gap:1rem; flex-wrap:wrap}
+.entry-head h3{font-size:.98rem; margin:0}
+.entry-head .where{color:var(--muted); font-size:.85rem}
+.entry ul{margin-top:.35rem; font-size:.92rem}
+
+.project{border-bottom:1px solid var(--line); padding-bottom:1.1rem; margin-bottom:1.1rem}
+.project:last-child{border-bottom:none; padding-bottom:0}
+.project h3{font-size:1rem; margin:0 0 .2rem}
+.project h3 a{color:inherit}
+.project .stack{color:var(--muted); font-size:.85rem; margin:0 0 .4rem}
+.project p{margin:0; font-size:.92rem}
+.repo-link{display:inline-block; margin-top:.45rem; font-size:.85rem}
+
+.skill-group{margin-bottom:.7rem; font-size:.92rem}
+.skill-group:last-child{margin-bottom:0}
+.skill-group strong{color:var(--muted); font-weight:600; display:block; font-size:.8rem; text-transform:uppercase; letter-spacing:.05em; margin-bottom:.25rem}
+
+.contact-list{display:flex; flex-direction:column; gap:.4rem; font-size:.95rem}
+
+footer{margin-top:3rem; color:var(--muted); font-size:.8rem}
+
+/* ---------- blog ---------- */
+
+/* index: post list */
+.post-list{list-style:none; margin:0; padding:0}
+.post-list li{border-bottom:1px solid var(--line); padding-bottom:1.1rem; margin-bottom:1.1rem}
+.post-list li:last-child{border-bottom:none; padding-bottom:0; margin-bottom:0}
+.post-list h3{font-size:1rem; margin:0 0 .2rem}
+.post-list h3 a{color:inherit}
+.post-meta{color:var(--muted); font-size:.85rem; margin:0 0 .4rem}
+.post-list p.summary{margin:0; font-size:.92rem}
+
+/* single post body */
+.post-body{font-size:.97rem}
+.post-body h2{font-size:1.1rem; margin:2.2rem 0 .6rem; text-transform:none; letter-spacing:0; color:var(--fg)}
+.post-body h3{font-size:1rem; margin:1.6rem 0 .4rem}
+.post-body p{margin:0 0 1rem}
+.post-body ul,.post-body ol{margin:0 0 1rem; padding-left:1.3rem}
+.post-body img{max-width:100%; height:auto; border:1px solid var(--line); border-radius:4px}
+.post-body blockquote{margin:0 0 1rem; padding:.2rem 0 .2rem 1rem; border-left:3px solid var(--line); color:var(--muted)}
+.post-body hr{border:none; border-top:1px solid var(--line); margin:2rem 0}
+
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.87em; background:var(--code-bg); padding:.1rem .3rem; border-radius:3px}
+pre{background:var(--code-bg); border:1px solid var(--line); border-radius:4px; padding:.8rem 1rem; overflow-x:auto; margin:0 0 1rem}
+pre code{background:none; padding:0; font-size:.85rem; line-height:1.45}
+
+.post-body table{width:100%; border-collapse:collapse; font-size:.9rem; margin:0 0 1rem; display:block; overflow-x:auto}
+.post-body th,.post-body td{border:1px solid var(--line); padding:.35rem .6rem; text-align:left}
+.post-body th{color:var(--muted); font-weight:600}
+
+.back-link{font-size:.85rem; color:var(--muted); display:inline-block; margin-bottom:1.2rem}

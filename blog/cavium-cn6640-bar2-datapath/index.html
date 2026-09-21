@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reverse engineering the Cavium CN6640 BAR2 datapath — Nicolò Giuliani</title>
+<meta name="description" content="Turning a Cavium CN6640 SNIC10E card with no public documentation into two working 10GbE interfaces under Linux, via a reverse-engineered PCIe BAR2 datapath.">
+<meta name="author" content="Nicolò Giuliani">
+<link rel="canonical" href="https://nicologiuliani.site/blog/cavium-cn6640-bar2-datapath/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Reverse engineering the Cavium CN6640 BAR2 datapath">
+<meta property="og:description" content="Turning a Cavium CN6640 SNIC10E card with no public documentation into two working 10GbE interfaces under Linux.">
+<meta property="og:url" content="https://nicologiuliani.site/blog/cavium-cn6640-bar2-datapath/">
+<meta property="article:published_time" content="2026-09-21">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Reverse engineering the Cavium CN6640 BAR2 datapath">
+<meta name="twitter:description" content="Turning a Cavium CN6640 SNIC10E card with no public documentation into two working 10GbE interfaces under Linux.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Reverse engineering the Cavium CN6640 BAR2 datapath",
+  "datePublished": "2026-09-21",
+  "url": "https://nicologiuliani.site/blog/cavium-cn6640-bar2-datapath/",
+  "author": { "@type": "Person", "name": "Nicolò Giuliani", "url": "https://nicologiuliani.site/" }
+}
+</script>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<main>
+  <a class="back-link" href="/blog/">← Blog</a>
+
+  <header>
+    <h1>Reverse engineering the Cavium CN6640 BAR2 datapath</h1>
+    <p class="post-meta"><time datetime="2026-09-21">21 September 2026</time></p>
+  </header>
+
+  <article class="post-body">
+
+    <p>
+      The Cavium CN6640 SNIC10E is an OCTEON II based smart NIC: two 10GbE ports in front of
+      a MIPS64 SoC that normally runs vendor firmware. That firmware is behind an NDA, and the
+      register-level documentation is not public. This post documents how I got the card working
+      as two ordinary 10GbE interfaces under mainline Linux, driven entirely through a
+      reverse-engineered PCIe BAR2 datapath, with no vendor blob on the card.
+    </p>
+
+    <p>
+      Source: <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic</a>.
+    </p>
+
+    <h2>Starting point</h2>
+
+    <p>
+      <!-- TODO: what the card enumerated as, what lspci showed, which BARs existed and their sizes,
+           and what (if anything) the in-tree drivers did with it. -->
+    </p>
+
+    <h2>Mapping the BARs</h2>
+
+    <p>
+      <!-- TODO: how you decided BAR2 was the datapath window: what you dumped, what patterns
+           you recognised, which offsets turned out to be doorbells/rings/status. -->
+    </p>
+
+    <h2>Bringing up the datapath</h2>
+
+    <p>
+      <!-- TODO: descriptor ring layout, DMA mapping, interrupt handling, NAPI. -->
+    </p>
+
+    <h2>Booting without a serial console</h2>
+
+    <p>
+      <!-- TODO: how the card is brought up automatically at boot, no serial console needed. -->
+    </p>
+
+    <h2>Results</h2>
+
+    <p>The driver reaches line rate on TX and close to it on RX:</p>
+
+    <table>
+      <thead>
+        <tr><th>Direction</th><th>Throughput</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>TX</td><td>9.7–9.8 Gb/s</td></tr>
+        <tr><td>RX</td><td>8.1–8.8 Gb/s</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      <!-- TODO: test methodology (iperf3 flags, MTU, CPU, kernel version), and where the
+           remaining RX gap comes from. -->
+    </p>
+
+    <h2>What is left</h2>
+
+    <ul>
+      <li><!-- TODO --></li>
+    </ul>
+
+  </article>
+
+  <footer>nicologiuliani.site</footer>
+</main>
+</body>
+</html>

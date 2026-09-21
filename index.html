@@ -30,56 +30,7 @@
   "knowsAbout": ["Linux kernel development", "Systems programming", "Reversible computing", "Kubernetes", "Proxmox", "Ceph", "MikroTik RouterOS", "PCIe reverse engineering"]
 }
 </script>
-<style>
-  :root{
-    --bg:#ffffff; --fg:#1a1a1a; --muted:#5c5c5c; --line:#e5e5e5; --accent:#2563eb;
-  }
-  @media (prefers-color-scheme: dark){
-    :root{ --bg:#111214; --fg:#e8e8e8; --muted:#9a9a9a; --line:#2a2b2e; --accent:#6ea8fe; }
-  }
-  *{box-sizing:border-box}
-  body{
-    margin:0; background:var(--bg); color:var(--fg);
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-    line-height:1.55;
-  }
-  main{max-width:680px; margin:0 auto; padding:3rem 1.25rem 4rem}
-  header{margin-bottom:2.5rem}
-  h1{font-size:1.7rem; margin:0 0 .2rem}
-  .tagline{color:var(--muted); margin:0 0 1rem; font-size:1rem}
-  nav{display:flex; gap:1.1rem; flex-wrap:wrap; font-size:.88rem; border-top:1px solid var(--line); border-bottom:1px solid var(--line); padding:.7rem 0}
-  nav a{color:var(--muted)}
-  nav a:hover{color:var(--accent)}
-  section{margin:2.6rem 0}
-  section > h2{font-size:.8rem; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); margin:0 0 1.1rem}
-  a{color:var(--accent); text-decoration:none}
-  a:hover{text-decoration:underline}
-  ul{margin:0; padding-left:1.1rem}
-  li{margin-bottom:.35rem}
-
-  .entry{margin-bottom:1.3rem}
-  .entry:last-child{margin-bottom:0}
-  .entry-head{display:flex; justify-content:space-between; align-items:baseline; gap:1rem; flex-wrap:wrap}
-  .entry-head h3{font-size:.98rem; margin:0}
-  .entry-head .where{color:var(--muted); font-size:.85rem}
-  .entry ul{margin-top:.35rem; font-size:.92rem}
-
-  .project{border-bottom:1px solid var(--line); padding-bottom:1.1rem; margin-bottom:1.1rem}
-  .project:last-child{border-bottom:none; padding-bottom:0}
-  .project h3{font-size:1rem; margin:0 0 .2rem}
-  .project h3 a{color:inherit}
-  .project .stack{color:var(--muted); font-size:.85rem; margin:0 0 .4rem}
-  .project p{margin:0; font-size:.92rem}
-  .project .repo-link{display:inline-block; margin-top:.45rem; font-size:.85rem}
-
-  .skill-group{margin-bottom:.7rem; font-size:.92rem}
-  .skill-group:last-child{margin-bottom:0}
-  .skill-group strong{color:var(--muted); font-weight:600; display:block; font-size:.8rem; text-transform:uppercase; letter-spacing:.05em; margin-bottom:.25rem}
-
-  .contact-list{display:flex; flex-direction:column; gap:.4rem; font-size:.95rem}
-
-  footer{margin-top:3rem; color:var(--muted); font-size:.8rem}
-</style>
+<link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
 <main>
@@ -89,7 +40,7 @@
     <nav>
       <a href="#education">Education &amp; Publications</a>
       <a href="#experience">Experience</a>
-      <a href="#projects">Projects</a>
+      <a href="#writing">Writing</a>
       <a href="#skills">Skills</a>
       <a href="#contact">Contact</a>
     </nav>
@@ -125,34 +76,21 @@
     </div>
   </section>
 
-  <section id="projects">
-    <h2>Projects</h2>
+  <section id="writing">
+    <h2>Writing</h2>
 
-    <div class="project">
-      <h3><a href="https://github.com/nicologiuliani6/kairos">Kairos</a></h3>
-      <p class="stack">Reversible concurrent language — C, Python, Formal Semantics · BSc Thesis</p>
-      <p>Designed a reversible concurrent language with SOS semantics (rendezvous channels, parallelism, try/rollback). Built KairosVM: Python front-end (lexer, LALR(1) parser) + C bytecode interpreter with bidirectional execution. Case study: reversible Burrows-Wheeler transform.</p>
-      <a class="repo-link" href="https://github.com/nicologiuliani6/kairos">→ source</a>
-    </div>
+    <ul class="post-list">
 
-    <div class="project">
-      <h3><a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">cavium-cn6640-snic10e-octeon-ii-nic</a></h3>
-      <p class="stack">C, Linux Kernel, PCIe, Reverse Engineering</p>
-      <p>Out-of-tree Linux driver stack for the Cavium CN6640 SNIC10E card, exposing it as two 10GbE interfaces via a reverse-engineered PCIe BAR2 datapath — no vendor firmware NDA. Line-rate 10GbE TX (9.7–9.8 Gb/s), 8.1–8.8 Gb/s RX, automatic boot, no serial console.</p>
-      <a class="repo-link" href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">→ source</a>
-    </div>
+      <li>
+        <h3><a href="/blog/cavium-cn6640-bar2-datapath/">Reverse engineering the Cavium CN6640 BAR2 datapath</a></h3>
+        <p class="post-meta"><time datetime="2026-09-21">21 September 2026</time></p>
+        <p class="summary">How I turned an OCTEON II SNIC10E card with no public documentation and no vendor firmware into two working 10GbE interfaces under mainline Linux: mapping BAR2, rebuilding the descriptor rings, and getting to line-rate TX.</p>
+        <a class="repo-link" href="/blog/cavium-cn6640-bar2-datapath/">→ read</a>
+      </li>
 
-    <div class="project">
-      <h3>sophos-xgs107w-prestera</h3>
-      <p class="stack">C, Linux Kernel, Networking · in progress, private repo</p>
-      <p>Reviving the Marvell Prestera switch ASIC (11ab:7080) in a Sophos XGS 107w under Linux: adding upstream driver support for the chip and porting OpenWrt on top of it.</p>
-    </div>
+    </ul>
 
-    <div class="project">
-      <h3>Homelab Infrastructure</h3>
-      <p class="stack">Proxmox, Ceph, MikroTik RouterOS, ZFS</p>
-      <p>Built and maintain a five-node Proxmox cluster with Ceph as the distributed storage backend for self-hosted services.</p>
-    </div>
+    <p style="margin-top:1.4rem; font-size:.88rem"><a href="/blog/">All posts →</a></p>
   </section>
 
   <section id="skills">
