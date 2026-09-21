@@ -378,8 +378,18 @@ ip -br addr show oct0</code></pre>
     <p>
       <strong>Power draw and ASPM?</strong> No instrumented measurement yet — the card runs
       noticeably cooler to the touch than other 10 GbE NICs I've handled, and
-      <code>octnic</code> exposes temperatures plus an estimated draw in <code>sensors</code>, but
-      that estimate is a model, not a wattmeter. ASPM is untested and I would not assume it works:
+      <code>octnic</code> exposes temperatures plus an estimated draw in <code>sensors</code>:
+    </p>
+
+    <pre><code>cavium_card-pci-0200
+Adapter: PCI adapter
+board:            +34.2°C
+octeon-die:       +42.4°C
+card (estimate):  18.00 W</code></pre>
+
+    <p>
+      The ~18 W figure is a model, not a wattmeter, so treat it as an order of magnitude; the two
+      temperature sensors are real readings. ASPM is untested and I would not assume it works:
       given how much of the PCIe interface had to be reverse engineered to get basic BAR access,
       correctly implemented L0s/L1 negotiation on the card side is a generous assumption. Check
       whether it is even advertised in config space first.
