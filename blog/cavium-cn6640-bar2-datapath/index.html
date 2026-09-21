@@ -39,67 +39,404 @@
   <article class="post-body">
 
     <p>
-      The Cavium CN6640 SNIC10E is an OCTEON II based smart NIC: two 10GbE ports in front of
-      a MIPS64 SoC that normally runs vendor firmware. That firmware is behind an NDA, and the
-      register-level documentation is not public. This post documents how I got the card working
-      as two ordinary 10GbE interfaces under mainline Linux, driven entirely through a
-      reverse-engineered PCIe BAR2 datapath, with no vendor blob on the card.
+      The Cavium CN6640-SNIC10E is a dual-port 10 GbE PCIe card that shows up on eBay for about
+      $15. It is an OEM "SmartNIC": two SFP+ ports in front of an OCTEON II CN6640, an 8-core
+      MIPS64 SoC with 2 GiB of its own DDR3. It is also famous for being useless. The board is
+      built to run Cavium's vendor LiquidIO firmware, the in-tree <code>liquidio</code> driver
+      effectively does not work with these OEM boards (its flash-handshake boot model doesn't
+      match), secondhand cards tend to arrive with their bootloader in a rough state, and out of
+      the box <em>both</em> PCIe BARs read back all <code>0xFF</code>. People hit that same wall on
+      the OpenWrt forums back in 2021 and the board looked architecturally dead as anything but a
+      LiquidIO.
     </p>
 
     <p>
-      Source: <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic</a>.
+      This post is how I got mine working as two ordinary 10 GbE interfaces under mainline Linux —
+      <code>oct0</code> and <code>oct1</code>, <code>ip link</code>, DHCP, bridges, the lot — with
+      no vendor NDA firmware anywhere in the stack, the host OS untouched, and the whole thing
+      undoable if you want the card back to stock. TX runs at line rate (9.7–9.8 Gb/s) and RX at
+      8.1–8.8 Gb/s over a DAC to a 10 GbE peer, both ports live at once.
     </p>
-
-    <h2>Starting point</h2>
 
     <p>
-      <!-- TODO: what the card enumerated as, what lspci showed, which BARs existed and their sizes,
-           and what (if anything) the in-tree drivers did with it. -->
+      Source: <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic</a>
+      — driver, boot tooling and docs. There is also a
+      <a href="https://www.reddit.com/r/homelab/comments/1w3r8tp/turned_a_15_ebay_smart_nic_nobody_could_get/">discussion thread</a>
+      where most of the questions below came from.
     </p>
 
-    <h2>Mapping the BARs</h2>
+    <h2>How this was built, honestly</h2>
 
     <p>
-      <!-- TODO: how you decided BAR2 was the datapath window: what you dumped, what patterns
-           you recognised, which offsets turned out to be doorbells/rings/status. -->
+      Worth stating up front, because it came up: a significant part of the code and documentation
+      was written with LLM assistance, mainly Claude. The initial investigation and a lot of the
+      reverse engineering were manual — finding the serial console, working out how the board is
+      wired and how it behaves, the first hardware and memory probing, and tracking down some
+      rather obscure leaked copies of the Cavium development kit, which turned out to be the key
+      reference material. Once there was enough information to work from, the LLM was extremely
+      useful for digging through large amounts of code and finding obscure register addresses and
+      relationships that would have taken far longer by hand.
     </p>
-
-    <h2>Bringing up the datapath</h2>
 
     <p>
-      <!-- TODO: descriptor ring layout, DMA mapping, interrupt handling, NAPI. -->
+      I don't think that's something to hide. Companies declare hardware EOL and stop supporting
+      it; open source, reverse engineering and tools like this let one person give that hardware a
+      second life instead of binning it. The usual caveat applies in the other direction too — if
+      you run this on your own card, read the code.
     </p>
 
-    <h2>Booting without a serial console</h2>
+    <h2>Starting point: the BAR wall</h2>
 
     <p>
-      <!-- TODO: how the card is brought up automatically at boot, no serial console needed. -->
+      The card enumerates cleanly as PCI <code>177d:0092</code> (subsystem <code>177d:0001</code>),
+      Gen2 ×4, with two 64-bit prefetchable regions: a 16 KiB BAR0 (the SLI control CSRs) and a
+      64 MiB BAR2. Both are assigned by the BIOS, both map fine, and every single read from
+      either returns <code>0xFF</code>.
     </p>
 
-    <h2>Results</h2>
+    <p>
+      That reads like dead silicon and is not. The OCTEON exposes itself to the host through its
+      <strong>PEM</strong> inbound windows, and what those windows point at is decided
+      <em>from the card side</em>, by whatever boots on the SoC. The OEM boot-app simply never
+      programs them: no inbound mapping, no responder, all-ones on every read. The BAR wall is an
+      unprogrammed register, not a hardware limit.
+    </p>
 
-    <p>The driver reaches line rate on TX and close to it on RX:</p>
+    <p>
+      Programming <code>PEMX_P2N_BARx_START</code> and <code>PEMX_BAR1_INDEXx</code> from the card
+      — plain <code>write64</code> at the u-boot prompt over a serial cable, no firmware involved —
+      makes card physical memory appear in the host's BAR2 window. At that moment the card stops
+      being a black box and becomes 64 MiB of shared memory with an 8-core CPU on the far side.
+      Everything else in the project is built on that one fact.
+    </p>
+
+    <h2>Something to run on the card</h2>
+
+    <p>
+      With no vendor firmware, the card needs an OS. OpenWrt has an OCTEON target, and there is
+      existing SNIC10E board support — the released card image is built from
+      <a href="https://codeberg.org/stintel/openwrt.git">stintel/openwrt</a> branch
+      <code>snic10e-5.10</code> (commit <code>7bbf4b7</code>), building on earlier work in
+      <a href="https://git.laboratoryb.org/hurricos/openwrt/src/branch/snic10e-ethernet">hurricos/openwrt</a>.
+      That gets the board up and its XAUI Ethernet alive. It does not make it a NIC: the card can
+      talk to the wire, but nothing carries packets across PCIe.
+    </p>
+
+    <p>
+      The card OS is never flashed. The ~21 MiB initramfs image is pushed into card DRAM at every
+      boot and is gone at power-off. Exactly one permanent write happens on the card, once per
+      machine: a <code>saveenv</code> of the u-boot environment into NAND, so the card can be
+      booted from the host without a serial cable. <code>scripts/restore-bootapp.sh</code> puts
+      the stock environment back.
+    </p>
+
+    <h2>The datapath</h2>
+
+    <pre><code>        HOST                        PCIe                    CARD (OpenWrt from RAM)
+  ┌────────────────┐                                    ┌───────────────────────────┐
+  │ octnic         │   BAR2 window (64 MiB)             │ octshm_card               │
+  │ oct0 / oct1    │◄───── shared-memory rings ────────►│  per-port rings           │
+  │ (netdevs)      │                                    │  DPI RX engine            │
+  │                │   TX: host PIO into BAR window     │  XAUI tap                 │
+  │                │   RX: card DPI DMA into host RAM   │                           │
+  └────────────────┘                                    └─────────────┬─────────────┘
+                                                                      │ XAUI + DAC
+                                                                      ▼  peer 10 GbE</code></pre>
+
+    <p>
+      Inside the window, each port gets a control page (magic, version, ready/heartbeat, ring
+      indices, DMA bases, temperatures), a TX ring, an RX ring and packet buffers. The rings are
+      virtio-flavoured: 128 fixed-size slots with a <strong>phase bit</strong> per slot
+      (<code>(index &gt;&gt; 7) &amp; 1</code>), so producer and consumer tell a fresh slot from a
+      stale one with no lock and no shared head/tail read.
+    </p>
+
+    <p>
+      One detail that cost an afternoon: with <code>ports=2</code> each port gets its own 4 MiB
+      region and its own <code>PEMX_BAR1_INDEX</code>. A single 8 MiB allocation fails — it is
+      above the buddy allocator's <code>MAX_ORDER</code> (top order-10 = 4 MiB). Two 4 MiB
+      allocations mapped into consecutive BAR index windows look contiguous from the host side
+      anyway.
+    </p>
+
+    <h3>The rule that shapes everything: non-posted reads</h3>
+
+    <p>
+      PCIe writes are <strong>posted</strong> — fire and forget. Reads are
+      <strong>non-posted</strong>: every one stalls on a round trip. A datapath is fast when each
+      side only ever <em>writes</em> across the bus, and dies the moment a per-frame read shows up
+      in the hot loop. That single rule decides both directions, and it is why the design is
+      asymmetric:
+    </p>
 
     <table>
       <thead>
-        <tr><th>Direction</th><th>Throughput</th></tr>
+        <tr><th></th><th>who writes</th><th>who reads</th><th>across PCIe</th></tr>
       </thead>
       <tbody>
-        <tr><td>TX</td><td>9.7–9.8 Gb/s</td></tr>
-        <tr><td>RX</td><td>8.1–8.8 Gb/s</td></tr>
+        <tr><td>RX (card → host)</td><td>card DPI writes host RAM</td><td>host reads its own RAM</td><td>writes only</td></tr>
+        <tr><td>TX (host → card)</td><td>host PIO writes the BAR window</td><td>card reads its own DRAM</td><td>writes only</td></tr>
       </tbody>
     </table>
 
     <p>
-      <!-- TODO: test methodology (iperf3 flags, MTU, CPU, kernel version), and where the
-           remaining RX gap comes from. -->
+      The two obvious-looking alternatives are exactly the ones that put a read on the wire: a
+      host that MMIO-reads an RX descriptor per frame out of the window, and a card that
+      DMA-<em>reads</em> host RAM for TX. Both are implemented in the repo's history, both lose.
+    </p>
+
+    <h3>RX: card-mastered DMA into host RAM</h3>
+
+    <p>
+      The card's <strong>DPI</strong> engine copies each received frame straight into a host-RAM
+      pool the host published in the control page, and — in the same DPI operation, posted last so
+      it lands after the payload — an 8-byte <code>{len, phase}</code> header ahead of it. The
+      host polls that header in its <em>own</em> memory. No descriptor read ever crosses the bus.
+    </p>
+
+    <p>
+      Forming the outbound address is the fiddly part. The card builds a physical address that the
+      SLI turns into a PCIe TLP to host bus address <code>H</code>:
+    </p>
+
+    <pre><code>card_phys = (1ull &lt;&lt; 63) | ((u64)subid &lt;&lt; 34) | (H &amp; 0x3FFFFFFFF);
+/* subid = 12 + (H &gt;&gt; 34); u-boot pre-programs SUBID 12..15 for PEM port 0
+ * with ba = 0,1,2,3 — each a 16 GiB PCIe window.
+ * esr = esw = 1 so the byte stream matches a little-endian host. */</code></pre>
+
+    <h3>TX: PIO fill and a zero-copy PKO gather</h3>
+
+    <p>
+      The host writes frames directly into the BAR2 TX buffer through a write-combining mapping,
+      claiming slots with a CAS so several TX queues fill the single ring in parallel; the card
+      drains by phase bit.
+    </p>
+
+    <p>
+      The card-side drain is where the performance is. The first version allocated a 9 KB skb and
+      <code>memcpy</code>'d the PCIe-written window slot into it for every frame — about 43 µs of
+      cold-cache copy per frame. That per-packet CPU cost, not the link and not the DMA engine
+      (which benches above 14 Gb/s), was the wall at 8.3 Gb/s. The zero-copy path copies only the
+      first 64 B of headers linear and hands PKO a <strong>frag pointing straight at the window
+      slot</strong>, so the NIC DMA-gathers the 9 KB payload with no big allocation and no payload
+      copy.
+    </p>
+
+    <p>
+      Slot reuse needs no completion handshake: PKO drains at wire (9.89 Gb/s) faster than the host
+      can fill over PCIe (≤ 8.4 Gb/s), so with 128 slots a frame is always done transmitting before
+      the host wraps back to its slot.
+    </p>
+
+    <h2>Three bugs worth the write-up</h2>
+
+    <p>
+      <strong>The 64-byte header split.</strong> My first zero-copy cut put only the 14 B Ethernet
+      header linear and left IP+TCP in the frag. The octeon-ethernet TX path reads
+      <code>ip_hdr(skb)</code> from the <em>linear</em> region to make its checksum-offload
+      decision, so it read garbage, set a bad <code>ipoffp1</code>, and PKO recomputed the checksum
+      at the wrong offset — every single frame corrupted, 141 Mb/s and a retransmit storm. Copying
+      a full 64 B (eth+ip+tcp) linear fixed it.
+    </p>
+
+    <p>
+      <strong>Completion gating that throttled everything.</strong> A scheme that freed window
+      slots via <code>skb-&gt;destructor</code> through the driver's lazy <code>tx_free_list</code>
+      capped TX at 299 Mb/s. Deleting it in favour of ring-depth safety is what unlocked line rate.
+    </p>
+
+    <p>
+      <strong>MaxPayload after a bus reset.</strong> A Secondary Bus Reset leaves the card's PCIe
+      MPS at 128 B while the bridge sits at 256 B. Re-matching the card to 256 B
+      (<code>setpci … CAP_EXP+8.w</code>, now done by <code>octboot</code>) took
+      <code>oct0</code> from 7.75 to 8.29 Gb/s on its own.
+    </p>
+
+    <p>
+      And one hazard worth repeating loudly, because it cost me three hard host freezes: BAR0's SLI
+      indirect window can read arbitrary card NCB addresses, but <code>SLI_WINDOW_CTL</code>
+      (BAR0 <code>0x2E0</code>) defaults to <strong>0 = infinite wait</strong>. A window read to a
+      space that doesn't answer stalls the PCIe bus and hard-locks the host — no oops, no
+      panic, just a dead machine. The vendor driver writes <code>0x200000</code> there first, with
+      a comment about avoiding a host hang. On this board DPI answers; DRAM, PEM and SLI-self all
+      hang. Set that register before touching the window.
+    </p>
+
+    <h2>Booting the card without a serial console</h2>
+
+    <p>
+      A NIC you have to hand-hold over a USB-serial adapter at every boot is a demo, not a NIC. The
+      host-side bootloader, <code>octboot</code>, does the whole sequence over PCIe: Secondary Bus
+      Reset → restore the BARs from live sysfs addresses → wait for the card's u-boot to program
+      its inbound window → push the ~21 MiB image into card DRAM through BAR2 (with a fix-up pass
+      for write-combining corruption) → let the card's <code>bootcmd</code> boot it → poll BAR2 for
+      the NIC heartbeat. A systemd unit runs it at every host boot, then loads
+      <code>octnic</code> and brings both ports up.
+    </p>
+
+    <p>
+      The serial cable is needed exactly once per machine, to persist the u-boot environment. After
+      that:
+    </p>
+
+    <pre><code>sudo systemctl start cavium-nic
+ip -br addr show oct0</code></pre>
+
+    <p>
+      <code>octnic</code> also registers an hwmon device, so card temperatures and an estimated
+      card power draw show up in plain <code>sensors</code> as <code>cavium_card</code>.
+    </p>
+
+    <h2>Results</h2>
+
+    <p>
+      Measured with <code>iperf3 -P8</code>, MTU 9000, on a fresh card boot, over a DAC to a
+      10 GbE peer:
+    </p>
+
+    <table>
+      <thead>
+        <tr><th>port</th><th>host → peer</th><th>peer → host</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>oct0</code> (xaui0)</td><td>9.71 Gb/s</td><td>8.10 Gb/s</td></tr>
+        <tr><td><code>oct1</code> (xaui1)</td><td>9.81 Gb/s</td><td>8.82 Gb/s</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      TX is line rate. RX sits at 85–90 % of wire, and the limit there is card-side capture, not
+      the bus: frames die between PIP and the driver tap when the NAPI cores can't keep up, while
+      the card's own counters show PIP drops at zero and the DPI queue near empty. RX scales with
+      the number of capture cores — 2 cores = 5.4 Gb/s, 4 = 8.2, 6 = 8.9, 8 = 7.2 (cross-core
+      contention). The zero-copy TX path needs only two. So the shipped split is two TX workers
+      pinned to cpu0-1 and the eight POW-group RX IRQs spread over cpu2-7.
+    </p>
+
+    <p>
+      With both ports loaded in the same direction the aggregate is ~10.5 Gb/s either way. That is
+      the host-PIO wall: x86 write-combining buffers flush as 64-byte PCIe TLPs, whose header
+      overhead caps a Gen2 ×4 link at roughly 73 % efficiency ≈ 11.7 Gb/s, and 10.5 is about 90 %
+      of that with the host CPUs still ~36 % idle. Beating it needs ≥ 256 B TLPs, i.e. card-pulled
+      DMA — which is read-latency-bound at 6.6 Gb/s. So that ceiling stays.
+    </p>
+
+    <h2>The one open front: full duplex</h2>
+
+    <p>
+      Real TX traffic collapses RX, even across ports (<code>oct0</code> TX + <code>oct1</code> RX
+      gives 9.5 + 2.2 Gb/s), and almost independently of the TX rate — pacing TX down to 4 G still
+      leaves RX at 2.75. A long elimination session with counters on the card ruled out PCIe
+      direction contention (a synthetic 100 %-duty BAR2 write flood has zero RX impact), host TX
+      ring drops (<code>tx_dropped = 0</code>), DPI starvation (doorbell backlog ≤ 36), PIP/RED
+      drops (zero), host qdisc ACK queuing (<code>fq</code> buys RX 0.13 → 0.73 Gb/s and costs TX
+      3.5), and L2 way-partitioning for the IOB (neutral).
+    </p>
+
+    <p>
+      UDP probes tell the real story: the card sustains <strong>8.7 TX + 4.8 RX = 13.5 Gb/s
+      aggregate</strong> full duplex. RX halves under any large TX — a card-global step that looks
+      like DRAM/IOB bandwidth, around 39 Gb/s of combined window traffic under duplex — but does
+      not collapse. What collapses is TCP: at that operating point the RX side runs ~46 % frame
+      loss, and TCP goodput dies under that loss.
+    </p>
+
+    <table>
+      <thead>
+        <tr><th>duplex mode</th><th>aggregate</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>UDP / loss-tolerant</td><td>13.5 Gb/s (8.7 + 4.8)</td></tr>
+        <tr><td>TCP, both sides paced</td><td>~6.8 Gb/s (4.0 + 2.8)</td></tr>
+        <tr><td>TCP, unpaced</td><td>~9.6 Gb/s (TX-priority, RX ~0)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Questions people asked</h2>
+
+    <p>
+      <strong>Packets per second?</strong> Every number above is at MTU 9000. Line-rate TX
+      (9.71 Gb/s) at that MTU works out to roughly 134 k packets/s, which lines up with the
+      ~130 k frames/s the card keeps delivering under full-duplex load. I have not measured
+      small-packet (64 B) pps, and I'd expect a meaningfully different story rather than the same
+      Gb/s divided into smaller frames: both bottlenecks I found were <em>per-frame</em> CPU costs
+      (the old TX <code>memcpy</code>, and RX capped by capture cores), which is exactly what
+      small packets stress. Small-packet pps is probably the real ceiling of this card.
+    </p>
+
+    <p>
+      <strong>Power draw and ASPM?</strong> No instrumented measurement yet — the card runs
+      noticeably cooler to the touch than other 10 GbE NICs I've handled, and
+      <code>octnic</code> exposes temperatures plus an estimated draw in <code>sensors</code>, but
+      that estimate is a model, not a wattmeter. ASPM is untested and I would not assume it works:
+      given how much of the PCIe interface had to be reverse engineered to get basic BAR access,
+      correctly implemented L0s/L1 negotiation on the card side is a generous assumption. Check
+      whether it is even advertised in config space first.
+    </p>
+
+    <p>
+      <strong>Crypto offload?</strong> The OCTEON II has hardware crypto/HFA acceleration — a big
+      part of why Cavium silicon shows up in VPN and firewall appliances — but nothing in this
+      datapath touches it. It's plain PCIe DMA, no offload wired up. Interesting thing to dig into
+      later.
+    </p>
+
+    <p>
+      <strong>Why a custom driver instead of emulating a standard NIC through VFIO?</strong> Fair
+      question and I hadn't considered it. My instinct is that emulating a conventional NIC model
+      would cost bandwidth — the whole reason this hits line rate is a datapath shaped around
+      posted writes only — and the BAR layout may not be flexible enough anyway. Worth looking at
+      if someone wants to.
+    </p>
+
+    <h2>The other use: no host at all</h2>
+
+    <p>
+      Once the card runs a full OpenWrt with its own CPU and RAM, independent of the host, it stops
+      being just a NIC. Things that become possible on the card side: traffic shaping, QoS or a
+      firewall that runs <em>before</em> packets reach the host CPU; a capture/mirroring tap that
+      costs the host nothing; flow logging offloaded entirely; with two cards, a bridge between two
+      networks where the host never sees both sides directly.
+    </p>
+
+    <p>
+      And the angle I most want to explore next: you don't need a host at all. Power the card
+      standalone and it's a two-port 10 GbE SFP+ router for roughly the price of a takeaway.
+      Conceptually that's the same idea as a MikroTik CCR2004-1G-2XS-PCIe — a full independent
+      CPU/RAM on a PCIe card exposing network ports — but at a very different scale: the MikroTik
+      is a shipping product with quad-core ARM, 4 GB DDR4, RouterOS and 2×25G, new for $160–200;
+      this is 2010s OEM silicon bought as e-waste, running OpenWrt, with an 8 MiB NOR and 2 GiB
+      RAM ceiling. For anything that is mostly packet-pushing rather than heavy compute there is
+      still plenty of headroom — and a couple of them make a cheap multi-router failover setup
+      with no shared host as a single point of failure.
     </p>
 
     <h2>What is left</h2>
 
     <ul>
-      <li><!-- TODO --></li>
+      <li><strong>Full-duplex TCP.</strong> The RX-ring-full loss under concurrent TX is the one
+        real open problem; the suspect is card-global memory bandwidth rather than anything on the
+        wire.</li>
+      <li><strong>Serial-free first install.</strong> The one-time u-boot provisioning still needs
+        the cable. Injecting a u-boot console over PCI was prototyped and dropped.</li>
+      <li><strong>Inbound-DPI TX</strong> stays off — read-latency-bound and slower than plain PIO
+        fill.</li>
+      <li><strong>Hardened recovery.</strong> A card driven hard can wedge, and recovery is a host
+        reboot: the card is bus-powered, so a Secondary Bus Reset resets the PEM link but not the
+        SoC.</li>
+      <li><strong>Numbers I owe people:</strong> 64 B-frame pps, and a real wattmeter reading
+        instead of a model.</li>
+      <li><strong>Standalone OpenWrt on the card</strong>, with no host in the picture at all.</li>
     </ul>
+
+    <p>
+      The whole stack — host module, card modules, the PCIe bootloader, the OpenWrt overlay and the
+      docs behind every number above — is GPL-2.0 on
+      <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">GitHub</a>,
+      including the first-time provisioning steps and how to reproduce the benchmarks on your own
+      board. If you have one of these cards sitting in a drawer, it now has a use — and if you want
+      to test on your own board or contribute, open an issue or a discussion there.
+    </p>
 
   </article>
 
