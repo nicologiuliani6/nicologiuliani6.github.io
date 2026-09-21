@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hardware — Cavium CN6640-SNIC10E docs</title>
+<meta name="description" content="The board itself: SoC, PHY, PCIe BARs, the BAR0 window freeze hazard, serial pinout, XAUI mapping.">
+<meta name="author" content="Nicolò Giuliani">
+<link rel="canonical" href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/hardware/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Hardware — Cavium CN6640-SNIC10E docs">
+<meta property="og:description" content="The board itself: SoC, PHY, PCIe BARs, the BAR0 window freeze hazard, serial pinout, XAUI mapping.">
+<meta property="og:url" content="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/hardware/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Hardware — Cavium CN6640-SNIC10E docs">
+<meta name="twitter:description" content="The board itself: SoC, PHY, PCIe BARs, the BAR0 window freeze hazard, serial pinout, XAUI mapping.">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<main>
+  <a class="back-link" href="/docs/cavium-cn6640-snic10e/">← Docs overview</a>
+
+  <header>
+    <h1>Hardware</h1>
+    <p class="tagline">Cavium CN6640-SNIC10E documentation</p>
+    <nav>
+      <a href="/docs/cavium-cn6640-snic10e/">Overview</a>
+      <a href="/docs/cavium-cn6640-snic10e/flashing/">Flashing</a>
+      <a href="/docs/cavium-cn6640-snic10e/usage/">Usage</a>
+      <a href="/docs/cavium-cn6640-snic10e/hardware/">Hardware</a>
+      <a href="/docs/cavium-cn6640-snic10e/performance/">Performance</a>
+      <a href="/docs/cavium-cn6640-snic10e/architecture/">Architecture</a>
+      <a href="/docs/cavium-cn6640-snic10e/dma-design/">DMA design</a>
+    </nav>
+  </header>
+
+  <article class="post-body">
+
+    <h2 id="the-card">The card</h2>
+    <table>
+    <thead><tr><th></th><th></th></tr></thead>
+    <tbody>
+    <tr><td><strong>Model</strong> (back sticker)</td><td><code>CN6640-SNIC10E-1.1-G</code></td></tr>
+    <tr><td><strong>Board id</strong> (serial console)</td><td><code>SNIC10E rev major:4 minor:1</code>, serial <code>4.1G1634-GB003886</code></td></tr>
+    <tr><td><strong>SoC</strong></td><td>Cavium Octeon II <strong>CN6640</strong> — 8-core MIPS64 @ 800 MHz (pass 1.2)</td></tr>
+    <tr><td><strong>PCI ID</strong></td><td><code>177d:0092</code>, subsystem <code>177d:0001</code></td></tr>
+    <tr><td><strong>RAM</strong></td><td>2 GiB DDR3 (667 MHz / 1334 DDR)</td></tr>
+    <tr><td><strong>Storage</strong></td><td>8 MiB NOR flash (u-boot + env) + 1 GiB NAND</td></tr>
+    <tr><td><strong>PHY</strong></td><td>Vitesse VSC8488 (dual 10 G)</td></tr>
+    <tr><td><strong>Ports</strong></td><td>2× SFP+ — XAUI interface 0 (<code>xaui0</code>) and interface 1 (<code>xaui1</code>)</td></tr>
+    <tr><td><strong>PCIe</strong></td><td>Gen2 x4, endpoint <code>177d:0092</code> (BDF is slot-dependent, e.g. <code>02:00.0</code>)</td></tr>
+    </tbody></table>
+    <p>The card is bus-powered. There is no independent power; the only way to fully power-cycle the Octeon is a <strong>host reboot</strong> (a PCIe Secondary Bus Reset resets the PEM link but not the SoC).</p>
+    <h2 id="bios">BIOS</h2>
+    <ul>
+    <li><strong>Secure Boot must be off.</strong> With Secure Boot on the kernel runs in <code>lockdown=integrity</code>: <code>setpci</code> and the BAR <code>mmap</code>s this stack needs return <code>EPERM</code>, and unsigned out-of-tree modules are refused (&quot;Key was rejected by service&quot;).</li>
+    <li><strong>&quot;Above 4G decoding&quot; is <em>not</em> required.</strong> Both BARs are 64-bit prefetchable but small enough (16 KiB + 64 MiB) to be assigned below 4 GiB, and that is where this machine&#x27;s BIOS puts them with the option <strong>off</strong> (<code>0xc8000000</code> / <code>0xc4000000</code>). Enable it only if the BIOS runs out of 32-bit MMIO space and leaves BAR2 unassigned — <code>lspci -s &lt;BDF&gt; -v</code> then shows <code>[virtual]</code> or a zero-size Region 2 and <code>octnic</code> won&#x27;t find the card.</li>
+    <li>Leave the card&#x27;s slot at Gen2; it trains at 5 GT/s x4.</li>
+    </ul>
+    <h2 id="pcie-bars-host-view">PCIe BARs (host view)</h2>
+    <p>After the card has booted its NIC image and programmed its PEM inbound windows:</p>
+    <table>
+    <thead><tr><th>BAR</th><th>host phys (example)</th><th>size</th><th>use</th></tr></thead>
+    <tbody>
+    <tr><td>BAR0</td><td><code>0xc8000000</code></td><td>16 KiB</td><td>SLI control CSRs (indirect window)</td></tr>
+    <tr><td>BAR2</td><td><code>0xc4000000</code></td><td>64 MiB</td><td>card DRAM window — the shared-memory NIC rings</td></tr>
+    </tbody></table>
+    <p><code>octnic</code> auto-discovers BAR2 from the PCI device; these addresses are never hard-coded.</p>
+    <blockquote>
+    <p>⚠️ <strong>BAR0 indirect-window freeze hazard.</strong> The SLI window registers (BAR0 <code>0x00–0x40</code>) can read/write arbitrary card NCB addresses, but <code>SLI_WINDOW_CTL</code> (BAR0 <code>0x2E0</code>) defaults to <strong>0 = infinite wait</strong>: a window read to a space that doesn&#x27;t respond stalls the PCIe bus and <strong>hard-freezes the host</strong> (three freezes during the zero-serial experiments). The vendor driver writes <code>0x200000</code> there first (&quot;avoid host hang when reads invalid register&quot;). On this board the window answers only for some devices — DPI yes; DRAM, PEM and SLI-self all hang. Set <code>SLI_WINDOW_CTL</code> before any window access.</p>
+    </blockquote>
+    <h2 id="serial-console-one-time-provisioning-only">Serial console (one-time provisioning only)</h2>
+    <p>Normal operation is serial-free. You need the console <strong>once</strong> to persist the u-boot boot environment (see <a href="/docs/cavium-cn6640-snic10e/flashing/">FLASHING</a>), and as a recovery path.</p>
+    <p>Header <strong>J1</strong> on the card, FT232 3.3 V USB-serial, <strong>115200 8N1</strong>:</p>
+    <table>
+    <thead><tr><th>FT232</th><th>Card J1</th></tr></thead>
+    <tbody>
+    <tr><td>GND</td><td>GND (bracket / J1 GND)</td></tr>
+    <tr><td>RX</td><td>J1 pin 5 (card TX)</td></tr>
+    <tr><td>TX</td><td>J1 pin 4 (card RX)</td></tr>
+    </tbody></table>
+    <pre><code># minicom / picocom at 115200; example with picocom
+picocom -b 115200 /dev/ttyUSB0</code></pre>
+    <p>Do <strong>not</strong> cross RX/TX the other way; pin 4 = card RX, pin 5 = card TX.</p>
+    <h2 id="cabling-for-two-ports">Cabling for two ports</h2>
+    <p>Each SFP+ port pairs 1:1 with a peer port over a DAC:</p>
+    <pre><code>card xaui0  &lt;--DAC--&gt;  peer port A   (=&gt; host oct0)
+card xaui1  &lt;--DAC--&gt;  peer port B   (=&gt; host oct1)</code></pre>
+    <p>Both ports are independent: one cabled port is enough to use the card.</p>
+    <h2 id="xaui-ipd_port-mapping">XAUI <code>ipd_port</code> mapping</h2>
+    <p><code>octcarrier</code> un-gates each XAUI port&#x27;s TX. The card-side <code>ipd_port</code> values are:</p>
+    <table>
+    <thead><tr><th>port</th><th>interface</th><th><code>ipd_port</code></th></tr></thead>
+    <tbody>
+    <tr><td><code>xaui0</code></td><td>0</td><td><code>0</code></td></tr>
+    <tr><td><code>xaui1</code></td><td>1</td><td><code>16</code></td></tr>
+    </tbody></table>
+    <p>(<code>dev=xaui0,xaui1 ipd_port=0,16</code>). <code>16</code> = interface-1 port-0 on CN66xx XAUI; <code>oct1</code> TX passes traffic only with it un-gated.</p>
+
+  </article>
+
+  <footer>Canonical documentation for <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">cavium-cn6640-snic10e-octeon-ii-nic</a>. Rendered from the repo docs. · <a href="/">nicologiuliani.site</a></footer>
+</main>
+</body>
+</html>

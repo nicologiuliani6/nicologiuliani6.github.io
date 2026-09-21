@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flashing &amp; booting the card — Cavium CN6640-SNIC10E docs</title>
+<meta name="description" content="Building the modules and the card image, the one-time serial u-boot provisioning, and booting with octboot.">
+<meta name="author" content="Nicolò Giuliani">
+<link rel="canonical" href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/flashing/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Flashing &amp; booting the card — Cavium CN6640-SNIC10E docs">
+<meta property="og:description" content="Building the modules and the card image, the one-time serial u-boot provisioning, and booting with octboot.">
+<meta property="og:url" content="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/flashing/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Flashing &amp; booting the card — Cavium CN6640-SNIC10E docs">
+<meta name="twitter:description" content="Building the modules and the card image, the one-time serial u-boot provisioning, and booting with octboot.">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<main>
+  <a class="back-link" href="/docs/cavium-cn6640-snic10e/">← Docs overview</a>
+
+  <header>
+    <h1>Flashing &amp; booting the card</h1>
+    <p class="tagline">Cavium CN6640-SNIC10E documentation</p>
+    <nav>
+      <a href="/docs/cavium-cn6640-snic10e/">Overview</a>
+      <a href="/docs/cavium-cn6640-snic10e/flashing/">Flashing</a>
+      <a href="/docs/cavium-cn6640-snic10e/usage/">Usage</a>
+      <a href="/docs/cavium-cn6640-snic10e/hardware/">Hardware</a>
+      <a href="/docs/cavium-cn6640-snic10e/performance/">Performance</a>
+      <a href="/docs/cavium-cn6640-snic10e/architecture/">Architecture</a>
+      <a href="/docs/cavium-cn6640-snic10e/dma-design/">DMA design</a>
+    </nav>
+  </header>
+
+  <article class="post-body">
+
+    <p>One thing <strong>is</strong> written to the card permanently: the u-boot environment, <code>saveenv</code>&#x27;d into NAND once by <code>scripts/card-prep-hostboot.sh</code> (§3), so the card can be booted from the host with no serial cable. It replaces the stock boot-app autoboot env; <code>scripts/restore-bootapp.sh</code> writes the stock one back.</p>
+    <p>Nothing else is flashed — no bootloader, no firmware, no rootfs. The OS the NIC runs is pushed into DRAM on every boot and disappears at power-off: <code>octboot</code> pushes the image over PCIe and the card runs OpenWrt <strong>from RAM</strong>.</p>
+    <pre><code> (once)  serial → persist u-boot env  ─────────────┐
+ (each)  octboot → SBR → push image via BAR2 → card runs OpenWrt from RAM → heartbeat</code></pre>
+    <p>Two ways to get the pieces:</p>
+    <ul>
+    <li><strong>Prebuilt</strong> — download the card image from a <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/releases">release</a> into the repo root and run <code>sudo ./install.sh</code> for the host module. Skip to §3.</li>
+    <li><strong>From source</strong> — build the host module, the card modules and the OpenWrt image yourself: §1 and §2 below. Needed only if you change the card side.</li>
+    </ul>
+    <h2 id="1-build-the-modules-from-source">1. Build the modules (from source)</h2>
+    <p>Host module — <code>install.sh</code> does this for you (with DKMS when available); by hand, against the running kernel:</p>
+    <pre><code>cd hostmod &amp;&amp; make            # -&gt; octnic.ko
+sudo install -D -m0644 octnic.ko /lib/modules/$(uname -r)/extra/octnic.ko
+sudo depmod -a                # enables `modprobe octnic`</code></pre>
+    <p>Card modules (cross-built against the OpenWrt Octeon kernel). Point <code>KDIR</code>/toolchain at your OpenWrt build tree:</p>
+    <pre><code>KDIR=&lt;openwrt&gt;/build_dir/target-mips64_octeonplus_64_musl/linux-octeon_generic/linux-&lt;ver&gt;
+TC=&lt;openwrt&gt;/staging_dir/toolchain-mips64_octeonplus_64_gcc-*_musl
+export PATH=$TC/bin:$PATH STAGING_DIR=&lt;openwrt&gt;/staging_dir
+cd cardmod
+make -C $KDIR M=$PWD ARCH=mips CROSS_COMPILE=mips64-openwrt-linux-musl- \
+     octshm_card.ko octcarrier.ko</code></pre>
+    <h2 id="2-build-the-openwrt-image-from-source">2. Build the OpenWrt image (from source)</h2>
+    <p>The prebuilt image in the releases is this same build; <code>octboot</code> takes whichever it finds (repo root, an OpenWrt build tree under <code>$HOME</code>, or <code>IMG=&lt;path&gt;</code>).</p>
+    <p>The card image is the OpenWrt SNIC10E port — <a href="https://codeberg.org/stintel/openwrt.git">stintel/openwrt</a>, branch <code>snic10e-5.10</code>, commit <code>7bbf4b7</code>, which is what the released image was built from — plus <code>openwrt/patches/</code> (one local change to that tree) and this repo&#x27;s overlay (<code>openwrt/files/</code>), which bakes in the card modules and an <code>rc.local</code> that auto-loads the datapath at boot.</p>
+    <pre><code>OPENWRT_DIR=~/openwrt CLONE=1 ./openwrt/build-openwrt.sh   # clones the pinned commit, patches, builds</code></pre>
+    <ul>
+    <li><code>openwrt/snic10e.config</code> — kernel/config fragment for the target.</li>
+    <li><code>openwrt/files/</code> — root overlay: <code>/etc/rc.local</code> (loads <code>octcarrier</code> + <code>octshm_card</code>, spreads RX IRQs, starts the temp feed) and <code>/root/*.ko</code> (the baked card modules — build them with step 1 and drop them in; the binaries themselves are not tracked).</li>
+    </ul>
+    <p>The arguments <code>rc.local</code> passes are the tuned configuration behind the numbers in <a href="/docs/cavium-cn6640-snic10e/performance/">PERFORMANCE</a>:</p>
+    <table>
+    <thead><tr><th>module</th><th>argument</th><th>why</th></tr></thead>
+    <tbody>
+    <tr><td><code>octcarrier</code></td><td><code>dev=xaui0,xaui1 ipd_port=0,16</code></td><td>un-gate both XAUI TX paths</td></tr>
+    <tr><td><code>octshm_card</code></td><td><code>ports=2 uplink=xaui0,xaui1</code></td><td>one shared-memory ring pair per SFP+ port</td></tr>
+    <tr><td></td><td><code>dma=2 hrx=1 dpiwait=0</code></td><td>DPI RX into host RAM, async doorbell</td></tr>
+    <tr><td></td><td><code>zc=1 nworkers=2 bindcpu=1</code></td><td>zero-copy PKO TX gather on two pinned workers</td></tr>
+    <tr><td></td><td><code>lockfree=1 rxdrop=1</code></td><td>phase-bit rings, drop after the host tap</td></tr>
+    </tbody></table>
+    <p>Card-side parameters not in that list (<code>bench</code>, <code>blen</code>, <code>linrx</code>, <code>l2ca</code>, <code>wpar</code>, <code>ztx</code>, <code>rxwork</code>, <code>es</code>) are measurement or tuning knobs; the defaults are what ships.</p>
+    <ul>
+    <li><code>openwrt/patches/</code> — the local delta against the upstream commit; <code>build-openwrt.sh</code> applies it.</li>
+    <li><code>openwrt/hostfix/</code> — host-side build shims (gcc-14 warning downgrades, a <code>pipes</code> stub for Python 3.13) that OpenWrt 5.10&#x27;s host tools need on a current distro.</li>
+    <li><code>openwrt/build-openwrt.sh</code> — the build itself: clone/pin, patch, config, <code>make</code>.</li>
+    </ul>
+    <p>Result is an <strong>initramfs</strong> image, e.g. <code>bin/targets/octeon/generic/openwrt-octeon-generic-snic10e-initramfs-kernel.bin</code> (~21 MiB).</p>
+    <blockquote>
+    <p>Rebaking after a card-module change: <code>make target/linux/install</code> alone does <strong>not</strong> re-apply the <code>files/</code> overlay. Copy the new <code>.ko</code> into <code>build_dir/.../root-octeon/root/</code>, remove the <code>vmlinux-initramfs*</code> + staged <code>.bin</code> stamps to force the initramfs cpio relink, then re-run the install. The initramfs is uncompressed inside the ELF — <code>grep -a</code> the <code>.bin</code> for a module string to confirm the embed.</p>
+    </blockquote>
+    <h2 id="3-one-time-u-boot-provisioning-serial-once--scriptscard-prep-hostbootsh">3. One-time u-boot provisioning (serial, once) — <code>scripts/card-prep-hostboot.sh</code></h2>
+    <p><code>octboot</code> relies on a persisted u-boot environment that, on reset, <strong>programs the card&#x27;s PEM inbound window and then boots the pushed image</strong>. Provision it <strong>once</strong> over the serial console (<a href="/docs/cavium-cn6640-snic10e/hardware/#serial-console-one-time-provisioning-only">HARDWARE → serial</a>):</p>
+    <pre><code>sudo ./scripts/card-prep-hostboot.sh   # writes + saveenv the self-programming env, then: sudo ./octboot</code></pre>
+    <p>The script auto-detects the card, the bridge, and the serial port, resets the card to its u-boot prompt, and writes a persistent (<code>saveenv</code> → NAND) environment:</p>
+    <ul>
+    <li><code>bootdelay=1</code></li>
+    <li><code>wa/wb/wc/wd</code> — program the PEM inbound window (<code>PEMX_P2N_BAR0/BAR1_START</code> + 8× <code>BAR1_INDEX</code> for the 64 MiB DRAM window), ending in <code>flush_l2c; flush_dcache</code> to activate it,</li>
+    <li><code>bootcmd = run wa ; run wb ; run wc ; run wd ; sleep &lt;N&gt; ; flush ; bootoctlinux 0x20010000 numcores=8 endbootargs console=ttyS0,115200 octeon-ethernet.receive_group_order=3</code></li>
+    </ul>
+    <p>The window is programmed to this machine&#x27;s BIOS-assigned BAR0/BAR2, read live from sysfs. BAR bases move across reseats and differ between machines (this card went <code>f4000000</code> → <code>c4000000</code> after a reseat), and the card&#x27;s decode has to point where the host can reach it — so on another machine (or after a reseat that moves the BARs) run <code>card-prep-hostboot.sh</code> again.</p>
+    <p><code>sleep &lt;N&gt;</code> defaults to <strong>120 s</strong>, which leaves the host time to reach <code>octboot</code> while u-boot is still waiting. <code>sudo SLEEP=25 ./scripts/card-prep-hostboot.sh</code> boots faster with less margin; re-running the script is also how you change it afterwards.</p>
+    <p>To undo everything on the card, <code>scripts/restore-bootapp.sh</code> reverts it to the stock boot-app autoboot.</p>
+    <h2 id="4-boot-it-each-time-no-serial">4. Boot it (each time, no serial)</h2>
+    <pre><code>sudo ./octboot
+# output, abridged:
+# [ OK ] CN6640 detected
+# [ OK ] Secondary Bus Reset
+# [ OK ] BAR restored
+# [ OK ] Uploading OpenWrt...
+# [ OK ] Booting...
+# [ OK ] Heartbeat detected -- card ready. Load NIC: sudo modprobe octnic ports=2</code></pre>
+    <p>If a serial cable <em>is</em> attached and <code>octboot</code> can&#x27;t complete, <code>scripts/cavium-up.sh</code> falls back to a serial boot via <code>scripts/boot-clean.sh</code> (<code>scripts/cexec.sh</code> is the manual equivalent for running single commands on the card over the console).</p>
+    <p>Then bring up the NICs — see <a href="/docs/cavium-cn6640-snic10e/usage/">USAGE</a>.</p>
+    <h2 id="5-where-the-u-boot-env-lives-and-why-serial-is-still-needed-to-change-it">5. Where the u-boot env lives (and why serial is still needed to change it)</h2>
+    <p><strong>The u-boot environment cannot be edited from Linux on this board: it lives in NAND.</strong></p>
+    <p>The apparent target is the NOR partition named <code>environment</code> (mtd2, 64 KiB, erasesize <code>0x2000</code>), and <code>uboot-envtools</code> + <code>fw_setenv</code>/<code>fw_printenv</code> do work against it. That partition is a decoy: it ships blank, so u-boot falls back to its compiled-in default env (<code>bootcmd=bootp; … bootm</code>). A write to it round-trips fine, and u-boot never reads it.</p>
+    <p>Scanning every NOR partition (mtd0 <code>bootloader</code>, mtd1 <code>rootfs_data</code>, mtd2 <code>environment</code>) for a valid env whose <code>bootcmd</code> contains <code>bootoctlinux</code> finds none. The env <code>octboot</code> depends on (<code>bootdelay=1</code>, the <code>wa/wb/wc/wd</code> PEM-window vars, <code>bootcmd = run wa … ; bootoctlinux …</code>) is in the 1 GiB <strong>NAND</strong>, which this OpenWrt kernel does not expose as an mtd, so <code>fw_setenv</code> has no path to it. The env is persistent — written once via <code>saveenv</code> on the serial console — and the card boots from it every time.</p>
+    <p><code>/root/envdiag.sh</code> (run from <code>rc.local</code> ~20 s after boot) reports this at runtime over the control page: it writes a verdict to <code>/proc/octshm/env</code>, which <code>octshm_card</code> mirrors into the shared ctrl page at <strong>offset <code>0x200</code></strong>. Read it from the host:</p>
+    <pre><code>sudo python3 - &lt;&lt;&#x27;PY&#x27;   # BDF from: lspci -d 177d:0092
+import mmap,os
+m=mmap.mmap(os.open(&quot;/sys/bus/pci/devices/0000:02:00.0/resource2&quot;,os.O_RDWR),4096,mmap.MAP_SHARED)
+print(bytes(m[0x200:0x300]).split(b&quot;\0&quot;,1)[0].decode())
+PY
+# ENV_NAND: u-boot env in NAND (not fw_setenv-reachable). bootdelay=1 already permanent (octboot). NOR /dev/mtd2=writable decoy.</code></pre>
+    <p><strong>Changing the u-boot env</strong> (custom <code>bootcmd</code>, <code>bootdelay</code>, …) needs the serial console — see §3. There is no serial-free path: the writable NOR env is ignored by u-boot, and the NAND env it does read is not reachable from Linux.</p>
+    <blockquote>
+    <p>The <code>/proc/octshm/env</code> ⇄ BAR2 <code>0x200</code> control-page channel itself is reusable for any card-side → host status reporting where there is no serial/login (same pattern as the temp feed at <code>/proc/octshm/temp</code>).</p>
+    </blockquote>
+
+  </article>
+
+  <footer>Canonical documentation for <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">cavium-cn6640-snic10e-octeon-ii-nic</a>. Rendered from the repo docs. · <a href="/">nicologiuliani.site</a></footer>
+</main>
+</body>
+</html>

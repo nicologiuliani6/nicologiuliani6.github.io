@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture — Cavium CN6640-SNIC10E docs</title>
+<meta name="description" content="The datapath end to end: the BAR2 shared-memory rings, the card and host modules, the boot flow.">
+<meta name="author" content="Nicolò Giuliani">
+<link rel="canonical" href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/architecture/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Architecture — Cavium CN6640-SNIC10E docs">
+<meta property="og:description" content="The datapath end to end: the BAR2 shared-memory rings, the card and host modules, the boot flow.">
+<meta property="og:url" content="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/architecture/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Architecture — Cavium CN6640-SNIC10E docs">
+<meta name="twitter:description" content="The datapath end to end: the BAR2 shared-memory rings, the card and host modules, the boot flow.">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<main>
+  <a class="back-link" href="/docs/cavium-cn6640-snic10e/">← Docs overview</a>
+
+  <header>
+    <h1>Architecture</h1>
+    <p class="tagline">Cavium CN6640-SNIC10E documentation</p>
+    <nav>
+      <a href="/docs/cavium-cn6640-snic10e/">Overview</a>
+      <a href="/docs/cavium-cn6640-snic10e/flashing/">Flashing</a>
+      <a href="/docs/cavium-cn6640-snic10e/usage/">Usage</a>
+      <a href="/docs/cavium-cn6640-snic10e/hardware/">Hardware</a>
+      <a href="/docs/cavium-cn6640-snic10e/performance/">Performance</a>
+      <a href="/docs/cavium-cn6640-snic10e/architecture/">Architecture</a>
+      <a href="/docs/cavium-cn6640-snic10e/dma-design/">DMA design</a>
+    </nav>
+  </header>
+
+  <article class="post-body">
+
+    <pre><code>        HOST                        PCIe                    CARD (OpenWrt from RAM)
+  ┌────────────────┐                                    ┌───────────────────────────┐
+  │ octnic         │   BAR2 window (64 MiB)             │ octshm_card               │
+  │ oct0 / oct1    │◄───── shared-memory rings ────────►│  per-port rings           │
+  │ (netdevs)      │                                    │  DPI RX engine            │
+  │                │   TX: host PIO into BAR window     │  XAUI tap (packet_type)   │
+  │                │   RX: card DPI DMA into host RAM   │                           │
+  └────────────────┘                                    │ octcarrier                │
+                                                        │  xaui0/xaui1 TX un-gate   │
+                                                        └─────────────┬─────────────┘
+                                                                      │ XAUI + DAC
+                                                                      ▼  peer 10 GbE</code></pre>
+    <h2 id="the-channel-pem-inbound-windows">The channel: PEM inbound windows</h2>
+    <p>The card exposes its DRAM to the host through the Octeon <strong>PEM</strong> inbound BARs. The OEM boot-app never programmed them, so both BARs read all-<code>0xFF</code> (the &quot;BAR wall&quot;). Programming <code>PEMX_P2N_BARx_START</code> + <code>PEMX_BAR1_INDEXx</code> from the card (u-boot <code>write64</code>, or from the kernel module) maps card physical memory into the host&#x27;s BAR2: a plain memory window, no firmware involved.</p>
+    <h2 id="shared-memory-nic-octshm">Shared-memory NIC (<code>octshm</code>)</h2>
+    <p>The BAR2 window holds, per port, a fixed layout: a <strong>control page</strong> (magic, version, ready/heartbeat, ring producer/consumer indices, DMA bases, temp), a <strong>TX descriptor ring</strong>, an <strong>RX descriptor ring</strong>, and packet buffers.</p>
+    <ul>
+    <li><strong>Ring format</strong> is virtio-style: fixed-size (128-slot) rings with a <strong>phase bit</strong> per slot (<code>(index &gt;&gt; 7) &amp; 1</code>) so producer and consumer can tell a fresh slot from a stale one without a lock (<code>lockfree=1</code>).</li>
+    <li><strong>Per-port regions.</strong> With <code>ports=2</code> each port gets its own 4 MiB region and its own <code>PEMX_BAR1_INDEX</code> (IDX0 → port0, IDX1 → port1). A single 8 MiB allocation is <strong>not</strong> used — it exceeds the buddy allocator <code>MAX_ORDER</code> (top order-10 = 4 MiB) and fails; two 4 MiB allocations mapped to consecutive BAR index windows look contiguous to the host.</li>
+    </ul>
+    <h3 id="rx-card--host--dma">RX (card → host) — DMA</h3>
+    <p>The card&#x27;s <strong>DPI</strong> (DMA Packet Interface) engine copies received frames into host memory. In <strong><code>hrx</code></strong> mode the card DPI-writes an 8-byte <code>{len, phase}</code> header + the frame into a host-RAM RX pool; the host reads the header locally (no per-frame MMIO descriptor read across PCIe), which is what lifts RX to <strong>8.1–8.8 Gb/s</strong>. The card&#x27;s eight POW-group RX IRQs are spread over cpu2-7 so RX capture runs on six cores while the two zero-copy TX workers keep cpu0-1. See <a href="/docs/cavium-cn6640-snic10e/dma-design/">DMA-DESIGN</a>.</p>
+    <h3 id="tx-host--card--pio-fill--zero-copy-pko-gather">TX (host → card) — PIO fill + zero-copy PKO gather</h3>
+    <p>The host posts frames by writing directly into the BAR2 TX buffer (write-combining), with a CAS-claimed slot + per-slot TX phase so multiple host TX queues (<code>ntxq</code>) can fill the single ring in parallel; the card drains by phase. On the card side (<code>zc=1</code>, default) the drain is <strong>zero-copy</strong>: instead of allocating a 9 KB skb and <code>memcpy</code>-ing the window slot into it, the worker copies only the 64 B of L2-L4 headers linear and hands PKO a <strong>frag pointing straight at the window slot</strong>, so the NIC DMA-gathers the payload with no big alloc and no payload copy. That removes the per-frame CPU wall and takes TX to <strong>line-rate 10 GbE</strong> (see <a href="/docs/cavium-cn6640-snic10e/performance/">PERFORMANCE</a>). Slot reuse needs no completion handshake: PKO drains at wire faster than the host fills over PCIe, so ring depth (128) alone guarantees a slot is done transmitting before the host wraps to it. (The <em>inbound-DPI</em> variant — card DMA-<em>reads</em> host RAM — is a different path and stays off: read-latency-bound, slower than PIO fill.)</p>
+    <h2 id="xaui-uplink-octcarrier">XAUI uplink (<code>octcarrier</code>)</h2>
+    <p>The card bridges each shared-memory ring to a physical XAUI port. On the QLogic DAC the Vitesse PHY keeps the XAUI TX gated until <code>cvmx_helper_link_set(ipd_port, up)</code> is called; <code>octcarrier</code> does exactly that for <code>xaui0</code> (<code>ipd_port=0</code>) and <code>xaui1</code> (<code>ipd_port=16</code>). Each port maps 1:1 to a host netdev, like the OEM 2-port LiquidIO.</p>
+    <h2 id="host-driver-octnic">Host driver (<code>octnic</code>)</h2>
+    <p><code>octnic</code> auto-discovers the card (PCI <code>177d:0092</code>), maps the BAR2 window, verifies the per-port magic, and registers <code>oct0</code>/<code>oct1</code>. It carries the port pointer in <code>netdev_priv</code>, runs <code>rxthreads</code> parallel RX drain kthreads per port, and registers an hwmon device carrying the card temperatures and an estimated card power draw. <code>base=0</code> (default) means no hard-coded address — <code>modprobe octnic ports=2</code> just works.</p>
+    <h2 id="boot-octboot">Boot (<code>octboot</code>)</h2>
+    <p><code>octboot</code> is the host bootloader: Secondary Bus Reset → restore BARs → wait for the card&#x27;s u-boot to program its window → push the ~21 MiB OpenWrt image into card DRAM over BAR2 (with a word-fix pass for write-combining corruption) → the card&#x27;s <code>bootcmd</code> boots it → poll BAR2 for the NIC heartbeat (magic + card_ready). No serial. Provisioning of the persistent u-boot env is described in <a href="/docs/cavium-cn6640-snic10e/flashing/">FLASHING</a>.</p>
+    <h2 id="not-implemented">Not implemented</h2>
+    <ul>
+    <li><strong>Inbound-DPI TX</strong> — the card-DMA-reads-host-RAM variant is read-latency-bound and loses to PIO fill; TX uses PIO fill + a zero-copy PKO frag gather on the card (<code>zc=1</code>).</li>
+    <li><strong>Flashing the card OS</strong> — the NIC image is pushed into DRAM at every boot, never written to the card&#x27;s flash. The one permanent write is the u-boot env in NAND (see <a href="/docs/cavium-cn6640-snic10e/flashing/">FLASHING</a>).</li>
+    <li><strong>Serial-free <em>first</em> install</strong> — the one-time u-boot provisioning still needs the serial cable (u-boot PCI-console injection was prototyped and dropped).</li>
+    </ul>
+
+  </article>
+
+  <footer>Canonical documentation for <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">cavium-cn6640-snic10e-octeon-ii-nic</a>. Rendered from the repo docs. · <a href="/">nicologiuliani.site</a></footer>
+</main>
+</body>
+</html>

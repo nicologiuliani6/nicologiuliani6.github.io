@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DMA design — Cavium CN6640-SNIC10E docs</title>
+<meta name="description" content="Why RX is card-mastered DPI DMA and TX is host PIO, and the constraints behind that split.">
+<meta name="author" content="Nicolò Giuliani">
+<link rel="canonical" href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/dma-design/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="DMA design — Cavium CN6640-SNIC10E docs">
+<meta property="og:description" content="Why RX is card-mastered DPI DMA and TX is host PIO, and the constraints behind that split.">
+<meta property="og:url" content="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/dma-design/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="DMA design — Cavium CN6640-SNIC10E docs">
+<meta name="twitter:description" content="Why RX is card-mastered DPI DMA and TX is host PIO, and the constraints behind that split.">
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<main>
+  <a class="back-link" href="/docs/cavium-cn6640-snic10e/">← Docs overview</a>
+
+  <header>
+    <h1>DMA design</h1>
+    <p class="tagline">Cavium CN6640-SNIC10E documentation</p>
+    <nav>
+      <a href="/docs/cavium-cn6640-snic10e/">Overview</a>
+      <a href="/docs/cavium-cn6640-snic10e/flashing/">Flashing</a>
+      <a href="/docs/cavium-cn6640-snic10e/usage/">Usage</a>
+      <a href="/docs/cavium-cn6640-snic10e/hardware/">Hardware</a>
+      <a href="/docs/cavium-cn6640-snic10e/performance/">Performance</a>
+      <a href="/docs/cavium-cn6640-snic10e/architecture/">Architecture</a>
+      <a href="/docs/cavium-cn6640-snic10e/dma-design/">DMA design</a>
+    </nav>
+  </header>
+
+  <article class="post-body">
+
+    <p><a href="/docs/cavium-cn6640-snic10e/architecture/">ARCHITECTURE</a> describes <em>what</em> the datapath does. This page is the <em>why</em> behind its asymmetry: RX is card-mastered DMA, TX is host PIO.</p>
+    <h2 id="the-constraint-non-posted-pcie-reads">The constraint: non-posted PCIe reads</h2>
+    <p>Writes across PCIe are <strong>posted</strong> — the writer fires and forgets. Reads are <strong>non-posted</strong>: every read stalls on a round trip. A datapath is fast when each side only ever <em>writes</em> across the bus, and slow the moment a per-frame <em>read</em> appears in the hot loop.</p>
+    <p>That single rule decides both directions:</p>
+    <table>
+    <thead><tr><th></th><th>who writes</th><th>who reads</th><th>across PCIe</th></tr></thead>
+    <tbody>
+    <tr><td><strong>RX</strong> (card → host)</td><td>card DPI writes host RAM</td><td>host reads its own RAM</td><td>writes only</td></tr>
+    <tr><td><strong>TX</strong> (host → card)</td><td>host PIO writes the BAR window</td><td>card reads its own DRAM</td><td>writes only</td></tr>
+    </tbody></table>
+    <p>The two rejected variants are exactly the ones that put a read on the wire: a host that reads RX descriptors out of the BAR window, and a card that DMA-<em>reads</em> host RAM for TX.</p>
+    <h2 id="rx-card-mastered-dma-into-host-ram-hrx1">RX: card-mastered DMA into host RAM (<code>hrx=1</code>)</h2>
+    <p>The card&#x27;s <strong>DPI</strong> engine copies each received frame into a host-RAM pool the host published, and — in the same DPI operation, posted last so it lands after the payload — an 8-byte <code>{len, phase}</code> header ahead of it. The host polls that header in its <strong>own</strong> RAM, so the per-frame descriptor read never crosses the bus. Without <code>hrx</code> the host had to MMIO-read a descriptor per frame from the window; that was the RX wall.</p>
+    <p>The remaining RX cost is on the card: capture. Spreading eight POW-group RX IRQs across cores (<code>receive_group_order=3</code>, IRQ affinity in the image&#x27;s <code>rc.local</code>) is what took RX from ~5.4 to ~8.9 Gb/s — see <a href="/docs/cavium-cn6640-snic10e/performance/">PERFORMANCE</a>.</p>
+    <h3 id="outbound-addressing-card--host-ram">Outbound addressing (card → host RAM)</h3>
+    <p>The card forms a physical address that turns into a PCIe TLP to host bus address <code>H</code>:</p>
+    <pre><code>card_phys = (1ull &lt;&lt; 63) | ((u64)subid &lt;&lt; 34) | (H &amp; 0x3FFFFFFFF)</code></pre>
+    <ul>
+    <li>bit 63 selects the memory-access region, bits [38:34] pick the SUBID, the low 34 bits are the offset;</li>
+    <li><code>subid = 12 + (H &gt;&gt; 34)</code> — u-boot pre-programs SUBID 12..15 for PEM port 0 with <code>ba = 0,1,2,3</code>, each covering a 16 GiB PCIe window (<code>ba</code> = PCIe address bits [63:34]);</li>
+    <li><code>CVMX_PEXP_SLI_MEM_ACCESS_SUBIDX(i) = CVMX_ADD_IO_SEG(0x00011F00000100E0) + (i &amp; 31)*16 - 16*12</code>, fields (<code>cn63/66 _s</code>): <code>ba:30@[41:12], port:3, nmerge, esr:2, esw:2, wtype:2, rtype:2</code>;</li>
+    <li>endianness: <code>esr = esw = 1</code> (<code>_CVMX_PCIE_ES=1</code>) makes the stream byte-identical to a little-endian host, matching the inbound BAR window.</li>
+    </ul>
+    <h2 id="tx-host-pio-fill-no-card-side-dma-read">TX: host PIO fill, no card-side DMA read</h2>
+    <p>The host writes frames straight into the BAR2 TX buffer with write-combining, claiming slots by CAS so several TX queues (<code>ntxq</code>) fill the one ring in parallel; the card drains by phase bit and hands PKO a frag pointing at the window slot (<code>zc=1</code>) instead of copying.</p>
+    <p>The alternative — the card DMA-<em>reads</em> the frame out of host RAM (<code>ztx=1</code>, inbound DPI) — is implemented and works, but is read-latency-bound at ~6.6 Gb/s against ~7.75 Gb/s for plain PIO fill, so it stays off.</p>
+    <h2 id="safety-gates-for-card-mastered-dma">Safety gates for card-mastered DMA</h2>
+    <p>The card writing host RAM is exactly the operation that corrupts memory when it goes wrong, so the rules are:</p>
+    <ul>
+    <li>no bus-master until the device has an IOMMU group (<code>ls /sys/bus/pci/devices/&lt;BDF&gt;/iommu_group</code>) — a stray card write then faults instead of landing in random host memory;</li>
+    <li>the card only ever forms <code>card_phys</code> from bus addresses the host published in the control page, with the offset clamped to the published size;</li>
+    <li>the PIO path stays the fallback (<code>dma=0</code> is the module default).</li>
+    </ul>
+    <blockquote>
+    <p>Enable the IOMMU at <strong>runtime</strong> (<code>echo DMA &gt; /sys/.../&lt;BDF&gt;/iommu_group/type</code>) rather than via a GRUB boot parameter on this host.</p>
+    </blockquote>
+
+  </article>
+
+  <footer>Canonical documentation for <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">cavium-cn6640-snic10e-octeon-ii-nic</a>. Rendered from the repo docs. · <a href="/">nicologiuliani.site</a></footer>
+</main>
+</body>
+</html>
