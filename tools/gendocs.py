@@ -47,7 +47,7 @@ DOC_URL = {
     "PERFORMANCE.md": BASE + "/performance/",
     "ARCHITECTURE.md": BASE + "/architecture/",
     "DMA-DESIGN.md": BASE + "/dma-design/",
-    "LICENSE": REPO + "/blob/master/LICENSE",
+    "LICENSE": REPO + "/blob/main/LICENSE",
 }
 
 
@@ -69,7 +69,7 @@ def rewrite_link(href):
         return href
     # any other repo-relative path: point at the file on GitHub
     clean = target.lstrip("./")
-    return f"{REPO}/blob/master/{clean}" + ("#" + anchor if anchor else "")
+    return f"{REPO}/blob/main/{clean}" + ("#" + anchor if anchor else "")
 
 
 def inline(text):
