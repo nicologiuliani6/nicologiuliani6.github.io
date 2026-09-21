@@ -135,16 +135,24 @@
 
     <h2>The datapath</h2>
 
-    <pre><code>        HOST                        PCIe                    CARD (OpenWrt from RAM)
-  ┌────────────────┐                                    ┌───────────────────────────┐
-  │ octnic         │   BAR2 window (64 MiB)             │ octshm_card               │
-  │ oct0 / oct1    │◄───── shared-memory rings ────────►│  per-port rings           │
-  │ (netdevs)      │                                    │  DPI RX engine            │
-  │                │   TX: host PIO into BAR window     │  XAUI tap                 │
-  │                │   RX: card DPI DMA into host RAM   │                           │
-  └────────────────┘                                    └─────────────┬─────────────┘
-                                                                      │ XAUI + DAC
-                                                                      ▼  peer 10 GbE</code></pre>
+    <pre><code>┌────────────────────────────────────┐
+│ HOST                               │
+│ octnic: oct0 / oct1 (netdevs)      │
+└────┬───────────────────────────────┘
+     │ PCIe, BAR2 window (64 MiB)
+     │ shared-memory rings (◄──►)
+     │ TX: host PIO into BAR window
+     │ RX: card DPI DMA into host RAM
+┌────┴───────────────────────────────┐
+│ CARD (OpenWrt from RAM)            │
+│ octshm_card                        │
+│   per-port rings                   │
+│   DPI RX engine                    │
+│   XAUI tap                         │
+└────┬───────────────────────────────┘
+     │ XAUI + DAC
+     ▼
+   peer 10 GbE</code></pre>
 
     <p>
       Inside the window, each port gets a control page (magic, version, ready/heartbeat, ring
