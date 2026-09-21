@@ -3,160 +3,242 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cavium CN6640-SNIC10E — overview — Cavium CN6640-SNIC10E docs</title>
-<meta name="description" content="What this project is, what it does to the card, and a quick start.">
+<title>Cavium CN6640-SNIC10E — two 10GbE ports from an OEM smart NIC</title>
+<meta name="description" content="Out-of-tree Linux driver stack and boot tooling that turns a Cavium CN6640-SNIC10E into two independent 10GbE interfaces — overview, quick start, documentation and FAQ.">
 <meta name="author" content="Nicolò Giuliani">
 <link rel="canonical" href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/">
 <meta property="og:type" content="article">
-<meta property="og:title" content="Cavium CN6640-SNIC10E — overview — Cavium CN6640-SNIC10E docs">
-<meta property="og:description" content="What this project is, what it does to the card, and a quick start.">
+<meta property="og:title" content="Cavium CN6640-SNIC10E — two 10GbE ports from an OEM smart NIC">
+<meta property="og:description" content="Driver stack and boot tooling that turns a Cavium CN6640-SNIC10E into two independent 10GbE interfaces. No vendor firmware.">
 <meta property="og:url" content="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Cavium CN6640-SNIC10E — overview — Cavium CN6640-SNIC10E docs">
-<meta name="twitter:description" content="What this project is, what it does to the card, and a quick start.">
+<meta name="twitter:title" content="Cavium CN6640-SNIC10E — two 10GbE ports from an OEM smart NIC">
+<meta name="twitter:description" content="Driver stack and boot tooling that turns a Cavium CN6640-SNIC10E into two independent 10GbE interfaces. No vendor firmware.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Cavium CN6640-SNIC10E — two 10GbE ports from an OEM smart NIC",
+  "description": "Out-of-tree Linux driver stack and boot tooling that turns a Cavium CN6640-SNIC10E into two independent 10GbE interfaces over a reverse-engineered PCIe BAR2 datapath.",
+  "url": "https://nicologiuliani.site/docs/cavium-cn6640-snic10e/",
+  "author": { "@type": "Person", "name": "Nicolò Giuliani", "url": "https://nicologiuliani.site/" },
+  "about": ["Cavium CN6640", "OCTEON II", "PCIe reverse engineering", "Linux kernel driver", "10 Gigabit Ethernet"]
+}
+</script>
 <link rel="stylesheet" href="/assets/style.css">
 </head>
 <body>
 <main>
-  <a class="back-link" href="/blog/cavium-cn6640-bar2-datapath/">← The write-up</a>
+  <a class="back-link" href="/">← Home</a>
 
   <header>
-    <h1>Cavium CN6640-SNIC10E — overview</h1>
-    <p class="tagline">Cavium CN6640-SNIC10E documentation</p>
+    <h1>Cavium CN6640-SNIC10E</h1>
+    <p class="tagline">Two independent 10 GbE host interfaces from a $15 OEM smart NIC — no vendor firmware.</p>
     <nav>
-      <a href="/docs/cavium-cn6640-snic10e/">Overview</a>
-      <a href="/docs/cavium-cn6640-snic10e/flashing/">Flashing</a>
-      <a href="/docs/cavium-cn6640-snic10e/usage/">Usage</a>
-      <a href="/docs/cavium-cn6640-snic10e/hardware/">Hardware</a>
-      <a href="/docs/cavium-cn6640-snic10e/performance/">Performance</a>
-      <a href="/docs/cavium-cn6640-snic10e/architecture/">Architecture</a>
-      <a href="/docs/cavium-cn6640-snic10e/dma-design/">DMA design</a>
+      <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">Repository</a>
+      <a href="#documentation">Documentation</a>
+      <a href="#quick-start">Quick start</a>
+      <a href="#faq">FAQ</a>
+      <a href="/blog/cavium-cn6640-bar2-datapath/">The write-up</a>
     </nav>
   </header>
 
   <article class="post-body">
 
-    <p>📖 <strong>Full documentation: <a href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/">nicologiuliani.site/docs/cavium-cn6640-snic10e</a></strong> — <a href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/flashing/">flashing &amp; booting</a> · <a href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/usage/">usage</a> · <a href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/hardware/">hardware</a> · <a href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/performance/">performance</a> · <a href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/architecture/">architecture</a> · <a href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/dma-design/">DMA design</a></p>
-    <p>📝 <strong>How it was built:</strong> <a href="https://nicologiuliani.site/blog/cavium-cn6640-bar2-datapath/">the write-up</a></p>
-    <p>✉️ <strong>Questions, or testing on your own board?</strong> <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/issues">Open an issue</a> or <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/discussions">a discussion</a>, or email <a href="mailto:nicolo.giuliani6@studio.unibo.it">nicolo.giuliani6@studio.unibo.it</a>.</p>
-    <p>Out-of-tree Linux driver stack and boot tooling for the <strong>Cavium CN6640-SNIC10E</strong> (Octeon II CN6640, PCI <code>177d:0092</code>), exposing the card as <strong>two independent 10 GbE host interfaces</strong> (<code>oct0</code>, <code>oct1</code>) over a reverse-engineered PCIe BAR2 shared-memory datapath. No vendor NDA firmware.</p>
+    <p>
+      Out-of-tree Linux driver stack and boot tooling for the <strong>Cavium CN6640-SNIC10E</strong>
+      (OCTEON II CN6640, PCI <code>177d:0092</code>), exposing the card as <strong>two independent
+      10 GbE host interfaces</strong> (<code>oct0</code>, <code>oct1</code>) over a
+      reverse-engineered PCIe BAR2 shared-memory datapath. No vendor NDA firmware.
+    </p>
+
     <blockquote>
-    <p>Status: <strong>working.</strong> Both ports link at 10 G on a DAC and pass traffic bidirectionally — TX at <strong>line-rate 10 GbE</strong> (9.7–9.8 Gb/s, zero-copy datapath) and RX at <strong>8.1–8.8 Gb/s</strong> (see <a href="/docs/cavium-cn6640-snic10e/performance/">PERFORMANCE</a>). Card boots with no serial cable; the host brings both NICs up automatically at boot.</p>
+      <p>
+        <strong>Status: working.</strong> Both ports link at 10 G on a DAC and pass traffic
+        bidirectionally — TX at line-rate 10 GbE (9.7–9.8 Gb/s, zero-copy datapath) and RX at
+        8.1–8.8 Gb/s. The card boots with no serial cable and the host brings both NICs up
+        automatically at boot.
+      </p>
     </blockquote>
-    <hr>
-    <h2 id="what-this-is">What this is</h2>
-    <p>The SNIC10E is an OEM Cavium &quot;SmartNIC&quot;: an 8-core Octeon II SoC with two SFP+ ports, meant to run vendor LiquidIO firmware. The stock <code>liquidio</code> driver cannot drive this OEM board (its soft-reset + flash-handshake boot model doesn&#x27;t fit it), and both PCIe BARs read back all-<code>0xFF</code> out of the box.</p>
-    <p>That &quot;BAR wall&quot; is <strong>unprogrammed PEM inbound registers</strong>, not a hardware limit. Programming <code>PEMX_P2N_BARx_START</code> / <code>PEMX_BAR1_INDEXx</code> from the card side (plain u-boot <code>write64</code>, no firmware) opens a full bidirectional host↔card channel over PCIe. On top of that channel this repo builds a real NIC:</p>
-    <ul>
-    <li>the card runs <strong>OpenWrt from RAM</strong> and moves packets between its XAUI ports and a shared-memory ring exposed to the host over <strong>BAR2</strong>;</li>
-    <li>the host driver <strong><code>octnic</code></strong> maps that ring and registers <code>oct0</code> / <code>oct1</code>;</li>
-    <li>RX (card→host) is DMA&#x27;d by the Octeon <strong>DPI</strong> engine; TX (host→card) is PIO into the BAR window. See <a href="/docs/cavium-cn6640-snic10e/architecture/">ARCHITECTURE</a>.</li>
-    </ul>
-    <p>The card OS is never flashed: it is pushed into DRAM at every boot and gone at power-off. The one permanent write is the card&#x27;s u-boot environment (<code>saveenv</code> to NAND, once, so the host can boot it without a serial cable) — <code>scripts/restore-bootapp.sh</code> puts the stock env back. The host side is out-of-tree modules + scripts (see <a href="/docs/cavium-cn6640-snic10e/usage/#uninstall">USAGE → uninstall</a>).</p>
-    <hr>
-    <h2 id="components">Components</h2>
+
+    <p>
+      The card runs OpenWrt <em>from RAM</em> — nothing is flashed, and the one permanent change
+      (the card's u-boot environment) is reversible. The host side is a kernel module plus
+      scripts. How it was built, and every dead end on the way, is in
+      <a href="/blog/cavium-cn6640-bar2-datapath/">the write-up</a>.
+    </p>
+
+    <h2 id="performance">Performance</h2>
+
     <table>
-    <thead><tr><th>Name</th><th>Side</th><th>Role</th></tr></thead>
-    <tbody>
-    <tr><td><code>octboot</code></td><td>host (bash)</td><td>Host <strong>bootloader</strong>: SBR the card, restore BARs, push the OpenWrt image into card DRAM over BAR2, wait for the NIC heartbeat. No serial.</td></tr>
-    <tr><td><code>octnic</code> (<code>hostmod/octnic.c</code>)</td><td>host (kmod)</td><td>Registers <code>oct0</code>/<code>oct1</code> over the card&#x27;s BAR2 window. Auto-discovers the card (<code>modprobe octnic ports=2</code>).</td></tr>
-    <tr><td><code>octshm_card</code> (<code>cardmod/</code>)</td><td>card (kmod)</td><td>Card end of the shared-memory datapath: per-port rings, DPI RX, XAUI uplink tap.</td></tr>
-    <tr><td><code>octcarrier</code> (<code>cardmod/</code>)</td><td>card (kmod)</td><td>Un-gates <code>xaui0</code>/<code>xaui1</code> TX on the QLogic DAC (<code>cvmx_helper_link_set</code>).</td></tr>
-    <tr><td><code>scripts/cavium-up.sh</code> / <code>scripts/nic-up.sh</code></td><td>host</td><td>Orchestrate a full bring-up: boot the card, load <code>octnic</code>, bring both ports up.</td></tr>
-    </tbody></table>
-    <p>Run entirely hands-off by the <code>system/cavium-nic.service</code> systemd unit.</p>
-    <hr>
+      <thead>
+        <tr><th>port</th><th>host → peer</th><th>peer → host</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>oct0</code> (xaui0)</td><td>9.71 Gb/s</td><td>8.10 Gb/s</td></tr>
+        <tr><td><code>oct1</code> (xaui1)</td><td>9.81 Gb/s</td><td>8.82 Gb/s</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      <code>iperf3 -P8</code>, MTU 9000, fresh card boot, one port at a time. Both ports loaded in
+      the same direction aggregate to ~10.5 Gb/s — the host-PIO 64 B-TLP wall on a Gen2 ×4 link.
+      Full duplex is the open front: 13.5 Gb/s aggregate with UDP, but TCP suffers under the RX
+      loss. Numbers, method and the tuning behind them:
+      <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/blob/main/docs/PERFORMANCE.md">PERFORMANCE</a>.
+    </p>
+
+    <h2 id="requirements">Requirements</h2>
+
+    <ul>
+      <li>The card in a PCIe slot, with <strong>Secure Boot off</strong> — kernel lockdown blocks
+        the <code>setpci</code> and BAR access this stack needs. "Above 4G decoding" is
+        <em>not</em> required.</li>
+      <li>A modern Linux host (developed on 6.14) with matching kernel headers;
+        <code>dkms</code> recommended so the module survives kernel upgrades.</li>
+      <li>The prebuilt card image from the
+        <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/releases">releases</a>,
+        or an OpenWrt build tree to build it yourself.</li>
+      <li>A USB-serial (FT232) adapter for the <strong>one-time</strong> u-boot provisioning only.
+        Normal operation is serial-free.</li>
+    </ul>
+
     <h2 id="quick-start">Quick start</h2>
+
     <pre><code>git clone https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic
 cd cavium-cn6640-snic10e-octeon-ii-nic
 
-# 1) the card&#x27;s OS image, prebuilt — octboot looks for it here in the repo root
+# 1) the card's OS image, prebuilt — octboot looks for it here in the repo root
 curl -LO https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/releases/latest/download/openwrt-octeon-generic-snic10e-initramfs-kernel.bin
 
 # 2) the host side: builds + installs octnic (DKMS), drops the configs, enables autostart
 sudo ./install.sh
 
-# 3) first time on this machine only — persist the card&#x27;s u-boot env (serial cable, once)
+# 3) first time on this machine only — persist the card's u-boot env (serial cable, once)
 sudo ./scripts/card-prep-hostboot.sh
 
 # 4) every boot, no serial: pushes the image over PCIe, brings up oct0 + oct1
 sudo systemctl start cavium-nic
 ip -br addr show oct0</code></pre>
-    <p>Step 4 is what the <code>cavium-nic</code> service runs at every host boot, so after step 3 the card comes up on its own. Steps 1–3 are once per machine.</p>
-    <p><strong>Building the image yourself</strong> instead of step 1 (needed only if you change the card side): <a href="/docs/cavium-cn6640-snic10e/flashing/">FLASHING §1–2</a>. <code>octboot</code> also takes <code>IMG=&lt;path&gt;</code> or finds the image in an OpenWrt build tree under <code>$HOME</code>.</p>
-    <p>Manual equivalent of step 4:</p>
-    <pre><code>sudo ./octboot                        # boot the card (no serial)
-sudo modprobe octnic ports=2          # oct0 + oct1 appear
-# assign IPs / bridge / use like any NIC</code></pre>
-    <p>Card temperatures and an estimated card power draw show up in plain <code>sensors</code> as <code>cavium_card</code> once <code>octnic</code> is loaded — see <a href="/docs/cavium-cn6640-snic10e/usage/#card-temperature-and-power">USAGE</a>.</p>
-    <p>Full details: <strong><a href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/">nicologiuliani.site/docs/cavium-cn6640-snic10e</a></strong> — <a href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/flashing/">flashing</a> · <a href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/usage/">usage</a> · <a href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/hardware/">hardware</a> · <a href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/architecture/">architecture</a> · <a href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/performance/">performance</a>. The same pages are in <a href="/docs/cavium-cn6640-snic10e/">docs/</a> as markdown.</p>
-    <hr>
-    <h2 id="repository-layout">Repository layout</h2>
-    <pre><code>install.sh          one-shot host installer (module via DKMS + configs + service)
-octboot             host bootloader: boots the card over PCIe, no serial
-hostmod/            octnic.c — host kernel module (native build, DKMS)
-                    power-model-check.py — self-check for the power1 model arithmetic
-cardmod/            octshm_card.c, octcarrier.c — card kernel modules (cross-built)
-scripts/            cavium-up.sh, nic-up.sh      — bring-up orchestration
-                    card-prep-hostboot.sh        — first-time serial u-boot provisioning (once)
-                    boot-clean.sh, cexec.sh      — serial fallbacks
-                    restore-bootapp.sh           — revert the card to its stock OEM boot
-openwrt/            snic10e.config, build-openwrt.sh, files/ — card image build + overlay
-                    patches/, hostfix/ — upstream delta + host build shims (GPL source)
-system/             cavium-nic.service, blacklist-liquidio.conf, 99-octnic-unmanaged.conf
-docs/               see docs/README.md for the index</code></pre>
-    <hr>
-    <h2 id="requirements">Requirements</h2>
-    <ul>
-    <li>The Cavium CN6640-SNIC10E card in a PCIe slot, with <strong>Secure Boot off</strong> (kernel lockdown blocks the <code>setpci</code>/BAR access this stack needs). &quot;Above 4G decoding&quot; is <em>not</em> required — see <a href="/docs/cavium-cn6640-snic10e/hardware/#bios">HARDWARE → BIOS</a>.</li>
-    <li>Host: modern Linux (developed on 6.14) with the matching kernel headers. <code>dkms</code> is optional but recommended — without it the module has to be rebuilt by hand after each kernel upgrade (<code>NODKMS=1</code> forces that path).</li>
-    <li>The card image: prebuilt in the <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/releases">releases</a>, or an OpenWrt build tree to build it yourself.</li>
-    <li>A USB-serial (FT232) adapter for the <strong>one-time</strong> u-boot provisioning only; normal operation is serial-free.</li>
-    </ul>
-    <hr>
-    <h2 id="credits">Credits</h2>
-    <ul>
-    <li><strong>OpenWrt SNIC10E support</strong> — the released card image is built from <a href="https://codeberg.org/stintel/openwrt.git">stintel/openwrt</a> branch <code>snic10e-5.10</code> (commit <code>7bbf4b7</code>), which brings up the board and its XAUI Ethernet; earlier work used <a href="https://git.laboratoryb.org/hurricos/openwrt/src/branch/snic10e-ethernet">hurricos/openwrt @ <code>snic10e-ethernet</code></a>. This project runs that image on the card and builds the host datapath on top of it.</li>
-    <li>Cavium/Marvell Octeon SDK (<code>cvmx_*</code> helpers) and the in-tree <code>liquidio</code> driver, used as reverse-engineering references for the SLI/DPI/PEM register layout.</li>
-    </ul>
-    <h2 id="contact">Contact</h2>
-    <p>Issues and discussions on this repo are the best place for anything technical — bug reports, or results from running this on your own board. Otherwise: <a href="mailto:nicolo.giuliani6@studio.unibo.it">nicolo.giuliani6@studio.unibo.it</a> · <a href="https://nicologiuliani.site/">nicologiuliani.site</a>.</p>
-    <h2 id="license">License</h2>
-    <p>GPL-2.0 — see <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/blob/main/LICENSE">LICENSE</a>. The kernel modules carry SPDX headers; scripts and docs are under the same license unless noted.</p>
-    <p>The card image attached to the <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/releases">releases</a> is a GPL-2.0 binary (OpenWrt + Linux). Its complete corresponding source is: upstream <a href="https://codeberg.org/stintel/openwrt.git">stintel/openwrt</a> at commit <code>7bbf4b7</code> (branch <code>snic10e-5.10</code>), plus <code>openwrt/patches/</code> (the one local change to that tree), <code>openwrt/snic10e.config</code> (the build config), <code>openwrt/files/</code> (the root overlay), <code>cardmod/</code> (the card modules baked into it) and <code>openwrt/build-openwrt.sh</code> (the script that builds it — <code>CLONE=1</code> clones and checks out the pinned commit for you).</p>
-    <h2 id="disclaimer">Disclaimer</h2>
-    <p>Reverse-engineered and unofficial. This stack power-cycles and reprograms an OEM card over PCIe, and a wedged card can hang the host under heavy load (see <a href="/docs/cavium-cn6640-snic10e/usage/#troubleshooting">USAGE → troubleshooting</a>) — recovery is a host reboot.</p>
-    <hr>
+
+    <p>
+      Step 4 is what the <code>cavium-nic</code> service runs at every host boot, so after step 3
+      the card comes up on its own. Steps 1–3 are once per machine. The manual equivalent is
+      <code>sudo ./octboot</code> followed by <code>sudo modprobe octnic ports=2</code>; both ports
+      are then ordinary netdevs.
+    </p>
+
     <h2 id="documentation">Documentation</h2>
-    <p>These pages are the canonical documentation for the project, grouped by what you are trying to do.</p>
-    <p>These pages are also published, rendered, at <strong><a href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/">nicologiuliani.site/docs/cavium-cn6640-snic10e</a></strong>.</p>
-    </blockquote>
-    <p>Start at the <a href="/docs/cavium-cn6640-snic10e/">project README</a> for what this is and a quick start. These pages are grouped by what you are trying to do.</p>
-    <h2 id="get-it-running">Get it running</h2>
+
+    <p>The reference documentation lives in the repository:</p>
+
     <table>
-    <thead><tr><th>Page</th><th>Read it when</th></tr></thead>
-    <tbody>
-    <tr><td><a href="/docs/cavium-cn6640-snic10e/flashing/">FLASHING</a></td><td>Building the modules and the card image, the one-time serial u-boot provisioning, and booting the card with <code>octboot</code>.</td></tr>
-    <tr><td><a href="/docs/cavium-cn6640-snic10e/usage/">USAGE</a></td><td>Day-to-day operation: the systemd autostart, <code>octnic</code> module parameters, temperatures and power in <code>sensors</code>, benchmarking, troubleshooting.</td></tr>
-    </tbody></table>
-    <h2 id="reference">Reference</h2>
-    <table>
-    <thead><tr><th>Page</th><th>Contents</th></tr></thead>
-    <tbody>
-    <tr><td><a href="/docs/cavium-cn6640-snic10e/hardware/">HARDWARE</a></td><td>The board itself: SoC, PHY, PCIe BARs, the BAR0 window freeze hazard, serial pinout, XAUI <code>ipd_port</code> mapping.</td></tr>
-    <tr><td><a href="/docs/cavium-cn6640-snic10e/performance/">PERFORMANCE</a></td><td>Measured throughput, the tuning that got there, and how to reproduce the numbers.</td></tr>
-    </tbody></table>
-    <h2 id="how-it-works">How it works</h2>
-    <table>
-    <thead><tr><th>Page</th><th>Contents</th></tr></thead>
-    <tbody>
-    <tr><td><a href="/docs/cavium-cn6640-snic10e/architecture/">ARCHITECTURE</a></td><td>The datapath end to end: the BAR2 shared-memory rings, the card and host modules, the boot flow.</td></tr>
-    <tr><td><a href="/docs/cavium-cn6640-snic10e/dma-design/">DMA-DESIGN</a></td><td>Why RX is DPI-DMA and TX is PIO, and the constraints behind that split.</td></tr>
-    </tbody></table>
+      <thead><tr><th>Page</th><th>Read it when</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/blob/main/docs/FLASHING.md">FLASHING</a></td>
+          <td>Building the modules and the card image, the one-time serial u-boot provisioning, and booting the card with <code>octboot</code>.</td>
+        </tr>
+        <tr>
+          <td><a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/blob/main/docs/USAGE.md">USAGE</a></td>
+          <td>Day-to-day operation: the systemd autostart, <code>octnic</code> module parameters, temperatures and power in <code>sensors</code>, benchmarking, troubleshooting.</td>
+        </tr>
+        <tr>
+          <td><a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/blob/main/docs/HARDWARE.md">HARDWARE</a></td>
+          <td>The board itself: SoC, PHY, PCIe BARs, the BAR0 window freeze hazard, serial pinout, XAUI <code>ipd_port</code> mapping.</td>
+        </tr>
+        <tr>
+          <td><a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/blob/main/docs/PERFORMANCE.md">PERFORMANCE</a></td>
+          <td>Measured throughput, the tuning that got there, and how to reproduce the numbers.</td>
+        </tr>
+        <tr>
+          <td><a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/blob/main/docs/ARCHITECTURE.md">ARCHITECTURE</a></td>
+          <td>The datapath end to end: the BAR2 shared-memory rings, the card and host modules, the boot flow.</td>
+        </tr>
+        <tr>
+          <td><a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/blob/main/docs/DMA-DESIGN.md">DMA-DESIGN</a></td>
+          <td>Why RX is card-mastered DPI DMA and TX is host PIO, and the constraints behind that split.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 id="faq">FAQ</h2>
+
+    <h3>Does this need vendor firmware or an NDA?</h3>
+    <p>
+      No. Nothing from Cavium's LiquidIO firmware is in the stack. The card runs OpenWrt pushed
+      into its DRAM over PCIe at every boot, and the host talks to it through a shared-memory
+      window the card opens itself.
+    </p>
+
+    <h3>Is it reversible? What does it write to the card?</h3>
+    <p>
+      One thing, once: the card's u-boot environment, <code>saveenv</code>'d to NAND so the host
+      can boot it without a serial cable. <code>scripts/restore-bootapp.sh</code> puts the stock
+      environment back. The OS itself is never flashed — it lives in RAM and is gone at power-off.
+      Removing the host module and the service is the rest of the rollback.
+    </p>
+
+    <h3>Why didn't the stock <code>liquidio</code> driver work?</h3>
+    <p>
+      Its soft-reset plus flash-handshake boot model doesn't fit this OEM board, and out of the box
+      both PCIe BARs read back all <code>0xFF</code>. That "BAR wall" is unprogrammed PEM inbound
+      registers, not a hardware limit — programming them from the card side opens the channel.
+      Keep <code>liquidio</code> blacklisted: it hangs the host probing this board.
+    </p>
+
+    <h3>What packets-per-second can it do?</h3>
+    <p>
+      At MTU 9000, line-rate TX is roughly 134 k packets/s. Small-frame (64 B) pps is not measured
+      yet, and it is likely the real ceiling of the card: both bottlenecks found while tuning were
+      per-frame CPU costs, which is exactly what small packets stress.
+    </p>
+
+    <h3>How much power does it draw? Does ASPM work?</h3>
+    <p>
+      The <code>card (estimate)</code> value in <code>sensors</code> is a model
+      (<code>baseline + per-Gbit/s</code>), not a measurement — the board has no power sensor.
+      Calibrate the two coefficients against a wall meter if you need a real figure. ASPM is
+      untested and unlikely to work out of the box.
+    </p>
+
+    <h3>Can I use the OCTEON's crypto acceleration?</h3>
+    <p>
+      Not through this datapath. The OCTEON II has hardware crypto/HFA, but nothing here wires it
+      up — the path is plain PCIe DMA.
+    </p>
+
+    <h3>Can the card run standalone, without a host?</h3>
+    <p>
+      That's the next thing to explore: powered on its own, the board is a two-port 10 GbE SFP+
+      router running OpenWrt, with its own 8-core CPU and 2 GiB of RAM.
+    </p>
+
+    <h3>Something wedged — what now?</h3>
+    <p>
+      If one port stops receiving, reload the module (<code>rmmod octnic &amp;&amp; modprobe octnic
+      ports=2</code>) and re-add the IPs; the rings resync without rebooting the card. A card that
+      has been driven hard can wedge outright, and because it is bus-powered, recovery is a host
+      reboot. Details in
+      <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/blob/main/docs/USAGE.md#troubleshooting">USAGE → troubleshooting</a>.
+    </p>
+
+    <h2 id="contact">Questions, or testing on your own board?</h2>
+
+    <p>
+      Open an
+      <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/issues">issue</a>
+      or a
+      <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/discussions">discussion</a>
+      on the repository, or email
+      <a href="mailto:nicolo.giuliani6@studio.unibo.it">nicolo.giuliani6@studio.unibo.it</a>.
+      Results from other boards are especially welcome — everything here was developed against a
+      single card.
+    </p>
 
   </article>
 
-  <footer>Canonical documentation for <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">cavium-cn6640-snic10e-octeon-ii-nic</a>. Rendered from the repo docs. · <a href="/">nicologiuliani.site</a></footer>
+  <footer>GPL-2.0 · <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">source on GitHub</a> · <a href="/">nicologiuliani.site</a></footer>
 </main>
 </body>
 </html>
