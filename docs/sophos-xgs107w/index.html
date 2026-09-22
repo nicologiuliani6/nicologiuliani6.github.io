@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sophos XGS 107w — OpenWrt on both computers inside a desktop firewall</title>
+<meta name="description" content="OpenWrt on both computers inside a Sophos XGS 87/107 desktop firewall — the Marvell CN9130 router and the AMD x86 Wi-Fi/USB board, joined by a PCIe endpoint link. Overview, quick start, documentation and FAQ.">
+<meta name="author" content="Nicolò Giuliani">
+<link rel="canonical" href="https://nicologiuliani.site/docs/sophos-xgs107w/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Sophos XGS 107w — OpenWrt on both computers inside a desktop firewall">
+<meta property="og:description" content="OpenWrt on both computers inside a Sophos XGS 87/107 desktop firewall. No Sophos code.">
+<meta property="og:url" content="https://nicologiuliani.site/docs/sophos-xgs107w/">
+<meta property="og:image" content="https://nicologiuliani.site/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nicologiuliani.site/assets/og.png">
+<meta name="twitter:title" content="Sophos XGS 107w — OpenWrt on both computers inside a desktop firewall">
+<meta name="twitter:description" content="OpenWrt on both computers inside a Sophos XGS 87/107 desktop firewall. No Sophos code.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Sophos XGS 107w — OpenWrt on both computers inside a desktop firewall",
+  "description": "OpenWrt on both computers inside a Sophos XGS 87/107 desktop firewall: the Marvell CN9130 router and the AMD x86 Wi-Fi/USB board, joined by a PCIe endpoint virtual Ethernet link. No Sophos code.",
+  "url": "https://nicologiuliani.site/docs/sophos-xgs107w/",
+  "author": { "@type": "Person", "name": "Nicolò Giuliani", "url": "https://nicologiuliani.site/" },
+  "about": ["Sophos XGS 107w", "Marvell CN9130", "OpenWrt", "PCIe endpoint", "Linux kernel driver", "Embedded Linux"]
+}
+</script>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<main>
+  <a class="back-link" href="/">← Home</a>
+
+  <header>
+    <h1>Sophos XGS 107w</h1>
+    <p class="tagline">OpenWrt on both computers inside a Sophos desktop firewall — no Sophos code.</p>
+    <nav>
+      <a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107">Repository</a>
+      <a href="#documentation">Documentation</a>
+      <a href="#quick-start">Quick start</a>
+      <a href="#faq">FAQ</a>
+      <a href="/blog/sophos-xgs107w-openwrt/">The write-up</a>
+      <a href="https://github.com/sponsors/nicologiuliani6">Sponsor</a>
+    </nav>
+  </header>
+
+  <article class="post-body">
+
+    <p>
+      The Sophos XGS 87/107 desktop firewall is, inside, <strong>two separate computers</strong>: a
+      Marvell CN9130 network processor (4 Cortex-A72 cores) driving all 8 gigabit ports, the SFP
+      cage and LuCI, and an AMD x86 board driving the Wi-Fi radio and the front USB port. A PCIe
+      endpoint link between the two, turned into a virtual Ethernet interface, joins them into one
+      LAN. This project replaces Sophos's firmware (SFOS) on both sides with OpenWrt. No Sophos
+      code is used.
+    </p>
+
+    <blockquote>
+      <p>
+        <strong>Status: working.</strong> Both computers run OpenWrt with their own LuCI, joined by
+        a virtual Ethernet (<code>ntb0</code>) over the internal PCIe link. Wired ports run at line
+        rate, Wi-Fi and the front USB port work. The stock Sophos system stays bootable on the NPU
+        as a fallback; the x86 has no fallback once converted.
+      </p>
+    </blockquote>
+
+    <p>
+      Two independent OpenWrt systems, two web interfaces, two passwords — connected by
+      <code>ntb0</code> so the network sees one LAN. How it was built, and every dead end on the
+      way, is in <a href="/blog/sophos-xgs107w-openwrt/">the write-up</a>.
+    </p>
+
+    <h2 id="two-systems">Two systems, two web interfaces</h2>
+
+    <table>
+      <thead><tr><th></th><th>Address</th><th>Manages</th></tr></thead>
+      <tbody>
+        <tr><td><strong>NPU</strong> (Marvell CN9130)</td><td><code>http://192.168.1.1</code></td><td>the router: 8 ports, SFP, WAN/LAN, firewall, DHCP, LEDs</td></tr>
+        <tr><td><strong>x86</strong> (AMD)</td><td><code>http://192.168.1.2</code></td><td>Wi-Fi, the front USB port, its own status</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      They are connected by an internal virtual Ethernet and share one LAN, but there is no single
+      combined interface — the NPU's menu only links to the x86's.
+    </p>
+
+    <h2 id="performance">Measured</h2>
+
+    <table>
+      <thead><tr><th></th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>Wired ports (NPU ↔ PC)</td><td>941 Mbit/s (line rate)</td></tr>
+        <tr><td>Internal NPU ↔ x86 link</td><td>630 Mbit/s (NPU→x86), 1.7 Gbit/s (x86→NPU)</td></tr>
+        <tr><td>Wi-Fi 5 GHz, no external antennas fitted</td><td>300–500 Mbit/s down, 200–400 up (5 streams, one client)</td></tr>
+        <tr><td>Front USB port</td><td>drive detected and readable; speed and hot-plug not measured</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      Not working or untested: the SFP cage (no module on hand), port LED polarity and colour
+      (wired in the device tree, unconfirmed), 2.4 GHz Wi-Fi and range, LAN-to-LAN routing
+      throughput, and <code>install.sh --serial</code> end-to-end on hardware.
+    </p>
+
+    <h2 id="requirements">Requirements</h2>
+
+    <ul>
+      <li>The appliance, a PC on the same network, and the x86 console (micro-USB) for the
+        installer.</li>
+      <li>Back up the stock system first (both the NPU eMMC and the x86 disk).</li>
+      <li>Access to the SFOS advanced shell (login <code>admin</code>, menu 5, then 3) to run the
+        installer on the appliance.</li>
+    </ul>
+
+    <h2 id="quick-start">Quick start</h2>
+
+    <pre><code>git clone https://github.com/nicologiuliani6/openwrt-sophos-xgs107.git
+cd openwrt-sophos-xgs107
+./install.sh --serial</code></pre>
+
+    <p>
+      This builds the images, serves them, and runs both installers on the appliance
+      (<code>./install.sh</code> without <code>--serial</code> prints the two commands to paste
+      instead). Then power-cycle the appliance and open <code>http://192.168.1.1</code> (router)
+      and <code>http://192.168.1.2</code> (x86, Wi-Fi), and set a root password on each — there is
+      no default.
+    </p>
+
+    <p>
+      <strong>Never let SFOS boot on the x86 after conversion</strong>: it erases the OpenWrt root.
+      On the NPU, SFOS stays bootable as a fallback.
+    </p>
+
+    <h2 id="documentation">Documentation</h2>
+
+    <p>The reference documentation lives in the repository:</p>
+
+    <table>
+      <thead><tr><th>Page</th><th>Contents</th></tr></thead>
+      <tbody>
+        <tr><td><a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107/blob/main/docs/install.md">install</a></td><td>Full installer walk-through.</td></tr>
+        <tr><td><a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107/blob/main/docs/usage.md">usage</a></td><td>Wi-Fi setup, consoles, day-to-day operation.</td></tr>
+        <tr><td><a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107/blob/main/docs/architecture.md">architecture</a></td><td>What runs where, the boot chains, why it's built this way.</td></tr>
+        <tr><td><a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107/blob/main/docs/hardware.md">hardware</a></td><td>Full board reference: SoC, switch, port map, PCIe endpoint facts.</td></tr>
+        <tr><td><a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107/blob/main/docs/npu-x86-link.md">npu-x86-link</a></td><td>The <code>ntb0</code> PCIe endpoint link, the patches it needed.</td></tr>
+        <tr><td><a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107/blob/main/docs/backup.md">backup</a> / <a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107/blob/main/docs/recovery.md">recovery</a></td><td>Backing up the stock system and recovering from a bad boot.</td></tr>
+        <tr><td><a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107/blob/main/docs/troubleshooting.md">troubleshooting</a></td><td>Known issues and fixes.</td></tr>
+        <tr><td><a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107/blob/main/docs/build.md">build</a></td><td>Building the images from source.</td></tr>
+        <tr><td><a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107/blob/main/docs/upstreaming.md">upstreaming</a></td><td>The kernel/device-tree patches sent to the Linux maintainers.</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="faq">FAQ</h2>
+
+    <h3>Does this need any Sophos code?</h3>
+    <p>
+      No. Both sides run stock OpenWrt on mainline Linux drivers. The proprietary SFOS kernel
+      modules the x86 used to reach the switch (<code>mv_armada_drv</code>, <code>mv_pcinet_drv</code>,
+      …) are not used anywhere in this stack.
+    </p>
+
+    <h3>Is it reversible?</h3>
+    <p>
+      On the NPU, yes — the stock Sophos system stays on its own eMMC slot and boots as a fallback
+      if OpenWrt's kernel fails to load. On the x86, no: OpenWrt is written over SFOS's own swap
+      area, and booting SFOS again on that side erases the OpenWrt root. Back up both sides before
+      installing.
+    </p>
+
+    <h3>How do the two computers talk to each other?</h3>
+    <p>
+      Over the CN9130's PCIe endpoint controller, which the stock firmware already leaves in
+      endpoint mode against the x86. A <code>pci-epf-vntb</code> virtual-NTB function turns that
+      link into an ordinary Ethernet interface (<code>ntb0</code>) on both sides — mainline Linux
+      code plus five small patches (BAR alignment, cache coherency, MSI, and two throughput fixes).
+      See <a href="/blog/sophos-xgs107w-openwrt/">the write-up</a>.
+    </p>
+
+    <h3>What if the NPU reboots or the x86 loses the link?</h3>
+    <p>
+      Resetting or losing the NPU while the x86 has the link bound reboots the x86 (the PCIe
+      endpoint disappears from under the driver). It comes back and re-links itself; the boot order
+      of the two systems does not matter.
+    </p>
+
+    <h3>Are these patches going upstream?</h3>
+    <p>
+      Yes. The <code>mv88e6xxx</code> switch driver fix is reviewed and accepted by the DSA
+      maintainer; the device-tree series describing the board is still waiting on a maintainer
+      ack. Neither is required to use the board today — the same changes already ship inside this
+      project's OpenWrt image. Status: <a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107/blob/main/docs/upstreaming.md">upstreaming.md</a>.
+    </p>
+
+    <h3>What's not working yet?</h3>
+    <p>
+      The SFP cage is untested (no module on hand), port LED wiring is a best guess pending
+      confirmation, 2.4 GHz Wi-Fi and range are unmeasured, and LAN-to-LAN routing throughput has
+      not been benchmarked.
+    </p>
+
+    <h2 id="contact">Questions, or testing on your own unit?</h2>
+
+    <p>
+      Open an
+      <a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107/issues">issue</a>
+      or a
+      <a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107/discussions">discussion</a>
+      on the repository, or email
+      <a href="mailto:nicolo.giuliani6@studio.unibo.it">nicolo.giuliani6@studio.unibo.it</a>.
+      Results from other XGS 87/107 units are especially welcome — everything here was developed
+      against a single unit.
+    </p>
+
+  </article>
+
+  <footer>GPL-2.0 · <a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107">source on GitHub</a> · <a href="/">nicologiuliani.site</a> · <a href="https://github.com/sponsors/nicologiuliani6">Sponsor</a></footer>
+</main>
+</body>
+</html>

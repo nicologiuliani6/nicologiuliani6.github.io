@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Two computers, one firewall: OpenWrt on the Sophos XGS 107w — Nicolò Giuliani</title>
+<meta name="description" content="Replacing Sophos's firmware with OpenWrt on both computers inside an XGS 87/107 desktop firewall, and building an Ethernet link between them over a PCIe endpoint with no Sophos code.">
+<meta name="author" content="Nicolò Giuliani">
+<link rel="canonical" href="https://nicologiuliani.site/blog/sophos-xgs107w-openwrt/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Two computers, one firewall: OpenWrt on the Sophos XGS 107w">
+<meta property="og:description" content="Replacing Sophos's firmware with OpenWrt on both computers inside an XGS 87/107 desktop firewall, with no Sophos code anywhere in the stack.">
+<meta property="og:url" content="https://nicologiuliani.site/blog/sophos-xgs107w-openwrt/">
+<meta property="og:image" content="https://nicologiuliani.site/assets/og.png">
+<meta property="article:published_time" content="2026-09-22">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nicologiuliani.site/assets/og.png">
+<meta name="twitter:title" content="Two computers, one firewall: OpenWrt on the Sophos XGS 107w">
+<meta name="twitter:description" content="Replacing Sophos's firmware with OpenWrt on both computers inside an XGS 87/107 desktop firewall, with no Sophos code anywhere in the stack.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Two computers, one firewall: OpenWrt on the Sophos XGS 107w",
+  "datePublished": "2026-09-22",
+  "url": "https://nicologiuliani.site/blog/sophos-xgs107w-openwrt/",
+  "author": { "@type": "Person", "name": "Nicolò Giuliani", "url": "https://nicologiuliani.site/" }
+}
+</script>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<main>
+  <a class="back-link" href="/blog/">← Blog</a>
+
+  <header>
+    <h1>Two computers, one firewall: OpenWrt on the Sophos XGS 107w</h1>
+    <p class="post-meta"><time datetime="2026-09-22">22 September 2026</time></p>
+  </header>
+
+  <article class="post-body">
+
+    <p>
+      The Sophos XGS 87/107 is sold as a small desktop firewall. Open it up and it is actually
+      <strong>two separate computers sharing one case</strong>: a Marvell CN9130 network processor
+      running four Cortex-A72 cores that drives all eight gigabit ports and the SFP cage, and an
+      AMD x86 board that exists purely to drive the Wi-Fi radio and the front USB port. Sophos's
+      own firmware (SFOS) glues the two together and presents them as one router. This is the
+      story of replacing both sides with OpenWrt, keeping the NPU's stock system as a fallback, and
+      building an Ethernet link between the two boards that uses no Sophos code at all.
+    </p>
+
+    <p>
+      If you just want to use one of these, start at the
+      <a href="/docs/sophos-xgs107w/">project page</a>: what it is, a quick start, and the FAQ. The
+      code and full reference documentation are at
+      <a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107">nicologiuliani6/openwrt-sophos-xgs107</a>.
+    </p>
+
+    <h2>How this was built, honestly</h2>
+
+    <p>
+      As with the last write-up on this site, a significant part of the code and documentation
+      here was written with LLM assistance (Claude, through Claude Code). The physical work —
+      opening the unit, wiring the serial adapters, cabling, power cycles, reading LEDs and ports —
+      and the decisions about what to actually do with the hardware were mine; reverse engineering
+      the stock system, the device tree, the kernel patches, the installer scripts, the build
+      system and the PCIe endpoint link were done with the AI doing the heavy lifting, under my
+      authorisation for every write to the device. I think that division of labour is worth stating
+      plainly rather than glossing over.
+    </p>
+
+    <h2>Two computers pretending to be one</h2>
+
+    <p>
+      The panel gives it away once you know to look: 8 RJ45 ports, one SFP cage labelled F1, a
+      front USB port, and both an RJ45 rollover console and a micro-USB console on the back — for
+      two different UARTs. Under SFOS, one login manages the whole box; under the hood, that login
+      is proxying into two operating systems that don't share a kernel, a filesystem or even an
+      architecture.
+    </p>
+
+    <table>
+      <thead><tr><th></th><th>NPU (CN9130)</th><th>x86</th></tr></thead>
+      <tbody>
+        <tr><td>Chip</td><td>Marvell CN9130, 4× Cortex-A72, 2 GB RAM, 7.3 GB eMMC</td><td>AMD RX-216TD, 4 GB RAM, 64 GB SATA flash</td></tr>
+        <tr><td>Does</td><td>the router: 8 RJ45 + SFP via the 88E6193X switch, NAT, DHCP, firewall</td><td>Wi-Fi (QCA988x) and the front USB port</td></tr>
+        <tr><td>Stock OS</td><td>SFOS on Marvell SDK Linux 4.14.207</td><td>SFOS on Linux 4.14.277</td></tr>
+        <tr><td>Console</td><td><code>ttyS0</code>, wired out through the x86's second UART</td><td>RJ45 rollover or micro-USB (Prolific PL2303), 38400 8N1</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      Under SFOS, the x86 reaches the switch ports only through a stack of Sophos-proprietary
+      kernel modules — <code>mv_armada_drv</code>, <code>mv_pcinet_drv</code>, <code>mv_giu_drv</code>
+      and friends, built for Linux 4.14.277 only. That's the whole reason a stock Linux or OpenWrt
+      image on the x86 sees no ports at all: without those modules there is nothing there, by
+      design. Mainline has to reach the NPU a different way.
+    </p>
+
+    <h2>What each side needed</h2>
+
+    <p>
+      The NPU side turned out to be the easy half. Everything relevant — the CN9130 SoC support,
+      <code>mvpp2</code> for its Ethernet, <code>sdhci-xenon</code> for the eMMC, and
+      <code>mv88e6xxx</code> DSA for the 88E6193X switch chip — already exists in mainline Linux.
+      No blobs, no vendor tree. The switch sits on the CN9130's MDIO bus with port 0 wired at
+      10 Gb/s into the SoC's <code>mvpp2</code>, so eight gigabit ports and an SFP cage come almost
+      for free once the device tree describes the board correctly.
+    </p>
+
+    <p>
+      The x86 side needed the Wi-Fi driver (<code>ath10k</code> for the QCA988x, also mainline) and
+      the USB port, both trivial once OpenWrt boots there at all. The problem was booting at all:
+      SFOS's disk has only two real MBR entries, and everything else — <code>/dev/boot</code>,
+      <code>/dev/swap</code>, <code>/dev/var</code> — SFOS creates itself at runtime. The installer
+      writes the OpenWrt root filesystem over SFOS's own 3.8 GB swap area and adds a real MBR entry
+      for it, keeps the kernel on the existing GRUB boot partition, and adds an <code>OpenWrt</code>
+      boot entry as the default. One consequence follows directly from that: <strong>SFOS must
+      never boot on the x86 again</strong>. It runs <code>mkswap</code> on that area at every boot,
+      which means the moment SFOS boots there, the OpenWrt root is gone. The NPU has a much softer
+      landing — its stock system lives in its own eMMC partition, untouched, and U-Boot falls back
+      to it automatically if OpenWrt's kernel doesn't load.
+    </p>
+
+    <h2>The interesting part: giving the x86 a network card it doesn't have</h2>
+
+    <p>
+      The x86 board has no Ethernet interface of its own — every network path it has goes through
+      the NPU. Under SFOS that's a proprietary multiplexed netdev on top of those Sophos kernel
+      modules. Under OpenWrt, it needed to be something else, built from parts already in the
+      kernel.
+    </p>
+
+    <p>
+      The CN9130 is wired to the x86 as a PCIe <strong>endpoint</strong> — from the x86's point of
+      view, the NPU shows up as a PCI device (<code>03:00.0</code>, Gen3 x2). Stock U-Boot already
+      leaves the CN9130's DesignWare PCIe controller in endpoint mode with the link up; the device
+      tree only needs to describe it as <code>snps,dw-pcie-ep</code> with a control BAR and a memory
+      window. Mainline Linux has exactly the function needed to turn a PCIe endpoint link into an
+      Ethernet interface: <code>pci-epf-vntb</code>, a virtual non-transparent-bridge endpoint
+      function, paired with the <code>ntb_netdev</code> driver on the host side. The NPU presents
+      itself, the x86 loads <code>ntb</code> + <code>ntb_hw_epf</code> + <code>ntb_transport</code>
+      + <code>ntb_netdev</code>, and out comes an ordinary interface, <code>ntb0</code>, on both
+      ends — bridged into the NPU's LAN. No Sophos code anywhere in that path.
+    </p>
+
+    <p>
+      It didn't work out of the box. Four separate bugs showed up between "the function attaches"
+      and "the link is actually fast":
+    </p>
+
+    <ol>
+      <li>
+        <strong>BAR alignment.</strong> This DesignWare core's BAR-match inbound iATU ignores the
+        low 20 bits of the target address — the BARs are 1 MiB, so anything placed with page
+        alignment inside them is at the wrong address as far as the hardware cares. The endpoint
+        framework allocates its 2 KiB control area with plain page alignment, so the host was
+        reading and writing up to 1 MiB below the real buffer: garbage memory-window counts,
+        commands the endpoint never saw. Found by dumping the iATU registers directly and
+        cross-checking against the stock kernel's own <code>armada_pcie_ep_bar_map</code>, which
+        uses the same standard registers. Fixed by forcing 1 MiB alignment in the endpoint features
+        and disabling the iATU windows U-Boot leaves configured.
+      </li>
+      <li>
+        <strong>Cache coherency.</strong> With the device tree's <code>dma-coherent</code> property
+        set, the host read stale DRAM — this PCIe master doesn't snoop the CPU caches. Removing the
+        property makes both directions honest.
+      </li>
+      <li>
+        <strong>MSI vs. MSI-X.</strong> The DesignWare core always advertises an MSI-X capability;
+        the NTB driver preferred it, but the endpoint function only ever raises plain MSI. The NPU
+        was writing interrupts through an empty MSI-X table, and the x86's IOMMU logged
+        <code>IO_PAGE_FAULT address=0x0</code> for its trouble. Fixed on the host side by preferring
+        MSI when both are advertised.
+      </li>
+      <li>
+        <strong>Throughput.</strong> Two separate problems here. Doorbells from the host are found
+        by polling the control area — there's no interrupt for that — and the default poll interval
+        rounds up to a full tick, 10 ms at <code>HZ=100</code>; dropping it to 1 ms (with the kernel
+        already running <code>HZ=1000</code>) tightened that considerably. Separately, the default
+        64 KiB transport frame size gives the 1 MiB shared window only 15 slots, so small packets
+        queue behind a full round trip; setting <code>transport_mtu=2048</code> on both sides gives
+        511 slots instead. Before these two fixes, iperf3 measured 12 Mbit/s one way and 6 the
+        other. After: <strong>630 Mbit/s NPU→x86, 1.7 Gbit/s x86→NPU</strong>.
+      </li>
+    </ol>
+
+    <p>
+      The result behaves like a normal, if asymmetric, link: 1.3 ms ping, the x86 reaches the
+      Internet through the NPU, and its LuCI and SSH are reachable from any LAN port. One coupling
+      is worth knowing before you rely on it: resetting or losing the NPU while the x86 has the
+      link bound reboots the x86, because the PCIe endpoint device disappears out from under an
+      active driver. It comes back and re-links itself with no intervention, and the boot order of
+      the two sides doesn't matter — a small service on the x86 just rescans PCI until the NPU's
+      function appears.
+    </p>
+
+    <h2>What it measures like</h2>
+
+    <table>
+      <thead><tr><th></th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>Wired RJ45 ports (NPU ↔ PC)</td><td>941 Mbit/s — line rate</td></tr>
+        <tr><td>Internal NPU↔x86 link</td><td>630 Mbit/s / 1.7 Gbit/s</td></tr>
+        <tr><td>Wi-Fi, 5 GHz, no external antennas fitted</td><td>300–500 Mbit/s down, 200–400 up</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      Not everything is measured yet. The SFP cage works electrically but there's no module on hand
+      to actually test it with. Port LEDs are wired in the device tree from the stock GPIO-expander
+      pinout, but which colour is which pin, and their active-high/low polarity, are guesses that
+      haven't been confirmed against real hardware behaviour — I'd rather say that plainly than
+      leave it implied that they're verified. LAN-to-LAN routing throughput hasn't been benchmarked
+      at all. And Wi-Fi ships off and open until you set an SSID and key yourself.
+    </p>
+
+    <h2>Sending it back upstream</h2>
+
+    <p>
+      None of this needs to leave the project's own OpenWrt tree to be usable — but a board this
+      undocumented is worth putting in front of the people who maintain the drivers it depends on,
+      both so it doesn't bit-rot as a private patch set and so someone who knows the hardware better
+      than I do gets a chance to catch anything wrong. Two things went out: a device-tree series
+      describing the CN9130 XGS 107w board, and a fix to the <code>mv88e6xxx</code> switch driver
+      (the 88E6191X/88E6193X don't have PTP, and the driver was assuming they did). The switch fix
+      is reviewed and accepted by the DSA maintainer; the device tree is still waiting on a
+      maintainer's ack. Using the board today needs neither — the same changes already ship inside
+      this project's own image — but if they land, the next person who finds one of these on a
+      shelf starts from mainline instead of from a private patch set.
+    </p>
+
+    <h2>What's left</h2>
+
+    <ul>
+      <li><strong>SFP.</strong> Wired and enabled, never tested with an actual module.</li>
+      <li><strong>Port LEDs.</strong> Polarity and colour mapping are guesses pending confirmation.</li>
+      <li><strong>Routing throughput</strong> LAN-to-LAN, and with a host on the WAN side: not
+        measured.</li>
+      <li><strong><code>install.sh --serial</code></strong> end to end, unattended, hasn't been run
+        on hardware in its current form.</li>
+      <li><strong>2.4 GHz Wi-Fi and range</strong>: untested (only one 5 GHz client, no external
+        antennas, was measured).</li>
+    </ul>
+
+    <p>
+      Everything here is GPL-2.0 on
+      <a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107">GitHub</a>, with the full
+      documentation behind every claim above: the install steps, the architecture, the hardware
+      reference down to the port map and PCIe endpoint register layout, and the upstreaming status.
+      The short version — what it is, how to install it, FAQ — is on the
+      <a href="/docs/sophos-xgs107w/">project page</a>. If you have one of these boxes and want to
+      try it, or you find something that doesn't match what's documented here, open an issue or a
+      discussion on the repo.
+    </p>
+
+  </article>
+
+  <footer>nicologiuliani.site · <a href="https://github.com/sponsors/nicologiuliani6">Sponsor</a></footer>
+</main>
+</body>
+</html>

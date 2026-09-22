@@ -2,11 +2,11 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://nicologiuliani.site/</loc>
-    <lastmod>2026-09-21</lastmod>
+    <lastmod>2026-09-22</lastmod>
   </url>
   <url>
     <loc>https://nicologiuliani.site/blog/</loc>
-    <lastmod>2026-09-21</lastmod>
+    <lastmod>2026-09-22</lastmod>
   </url>
   <url>
     <loc>https://nicologiuliani.site/blog/cavium-cn6640-bar2-datapath/</loc>
@@ -15,5 +15,13 @@
   <url>
     <loc>https://nicologiuliani.site/docs/cavium-cn6640-snic10e/</loc>
     <lastmod>2026-09-21</lastmod>
+  </url>
+  <url>
+    <loc>https://nicologiuliani.site/blog/sophos-xgs107w-openwrt/</loc>
+    <lastmod>2026-09-22</lastmod>
+  </url>
+  <url>
+    <loc>https://nicologiuliani.site/docs/sophos-xgs107w/</loc>
+    <lastmod>2026-09-22</lastmod>
   </url>
 </urlset>
