@@ -66,6 +66,8 @@ footer{margin-top:3rem; color:var(--muted); font-size:.8rem}
 .post-body p{margin:0 0 1rem}
 .post-body ul,.post-body ol{margin:0 0 1rem; padding-left:1.3rem}
 .post-body img{max-width:100%; height:auto; border:1px solid var(--line); border-radius:4px}
+.post-body figure{margin:0 0 1rem}
+.post-body figcaption{font-size:.85rem; color:var(--muted); margin-top:.4rem}
 .post-body blockquote{margin:0 0 1rem; padding:.2rem 0 .2rem 1rem; border-left:3px solid var(--line); color:var(--muted)}
 .post-body hr{border:none; border-top:1px solid var(--line); margin:2rem 0}
 
