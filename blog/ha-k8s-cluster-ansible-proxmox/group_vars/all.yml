@@ -1,0 +1,13 @@
+vip: "192.168.88.20"
+vip_port: 8443
+vrrp_pass: "CHANGE_ME"
+
+pod_cidr: "10.244.0.0/16"
+calico_version: "v3.30.3"
+
+longhorn_version: "v1.12.1"
+longhorn_replicas: 2
+
+metallb_version: "v0.16.1"
+metallb_pool: "192.168.88.40-192.168.88.49"
+web_ip: "192.168.88.40"

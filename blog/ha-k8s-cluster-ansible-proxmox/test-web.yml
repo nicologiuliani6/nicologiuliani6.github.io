@@ -1,0 +1,186 @@
+- name: MetalLB #IP virtuale per i Service LoadBalancer: un nodo alla volta lo possiede e lo annuncia via ARP (modalita' L2), se cade lo prende un altro
+  hosts: cp1
+  become: true
+  tags: [metallb]
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Scarica il manifest ufficiale
+      ansible.builtin.get_url:
+        url: "https://raw.githubusercontent.com/metallb/metallb/{{ metallb_version }}/config/manifests/metallb-native.yaml"
+        dest: /root/metallb-native.yaml
+        mode: "0644"
+
+    - name: Applica MetalLB
+      ansible.builtin.command: kubectl apply -f /root/metallb-native.yaml
+      changed_when: false #apply e' idempotente
+
+    - name: Attendi il controller
+      ansible.builtin.command: kubectl -n metallb-system rollout status deploy/controller --timeout=300s
+      changed_when: false
+
+    - name: Attendi gli speaker (uno per nodo)
+      ansible.builtin.command: kubectl -n metallb-system rollout status ds/speaker --timeout=300s
+      changed_when: false
+
+    - name: Pool di IP e annuncio L2 #il pool e' l'elenco di IP che MetalLB puo' assegnare; L2Advertisement dice di annunciarli via ARP
+      ansible.builtin.copy:
+        dest: /root/metallb-pool.yaml
+        content: |
+          apiVersion: metallb.io/v1beta1
+          kind: IPAddressPool
+          metadata:
+            name: pool
+            namespace: metallb-system
+          spec:
+            addresses:
+              - {{ metallb_pool }}
+          ---
+          apiVersion: metallb.io/v1beta1
+          kind: L2Advertisement
+          metadata:
+            name: l2
+            namespace: metallb-system
+          spec:
+            ipAddressPools: [pool]
+
+    - name: Applica il pool (riprova finche' il webhook di MetalLB e' pronto)
+      ansible.builtin.command: kubectl apply -f /root/metallb-pool.yaml
+      register: pool_apply
+      until: pool_apply.rc == 0
+      retries: 10
+      delay: 6
+      changed_when: false
+
+- name: Test - server web nginx con volume Longhorn #prova lo stack completo: scheduling, rete, DNS, storage, Service
+  hosts: cp1
+  become: true
+  tags: [deploy]
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Scrivi il manifest #namespace + PVC 1Gi + Deployment nginx + Service LoadBalancer (IP fisso web_ip)
+      ansible.builtin.copy:
+        dest: /root/test-web.yaml
+        content: |
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: test-web
+          ---
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: web-data
+            namespace: test-web
+          spec:
+            accessModes: [ReadWriteOnce]
+            storageClassName: longhorn
+            resources:
+              requests:
+                storage: 1Gi
+          ---
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: web
+            namespace: test-web
+          spec:
+            replicas: 1
+            strategy:
+              type: Recreate #volume RWO: il vecchio pod deve staccarlo prima che il nuovo lo agganci
+            selector:
+              matchLabels: {app: web}
+            template:
+              metadata:
+                labels: {app: web}
+              spec:
+                initContainers:
+                  - name: init-page #scrive la pagina sul volume solo la prima volta: se sopravvive a un cambio di nodo, la data resta la stessa
+                    image: busybox:1.37
+                    command:
+                      - sh
+                      - -c
+                      - '[ -f /data/index.html ] || echo "<h1>Longhorn OK</h1><p>pagina creata il $(date) dal pod $(hostname)</p>" > /data/index.html'
+                    volumeMounts:
+                      - {name: data, mountPath: /data}
+                containers:
+                  - name: nginx
+                    image: nginx:stable-alpine
+                    ports:
+                      - containerPort: 80
+                    volumeMounts:
+                      - {name: data, mountPath: /usr/share/nginx/html}
+                volumes:
+                  - name: data
+                    persistentVolumeClaim:
+                      claimName: web-data
+          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: web
+            namespace: test-web
+            annotations:
+              metallb.io/loadBalancerIPs: "{{ web_ip }}" #IP fisso dal pool MetalLB
+          spec:
+            type: LoadBalancer
+            selector: {app: web}
+            ports:
+              - port: 80
+                targetPort: 80
+
+    - name: Applica il manifest
+      ansible.builtin.command: kubectl apply -f /root/test-web.yaml
+      changed_when: false #apply e' idempotente
+
+    - name: Attendi che la PVC sia Bound #Longhorn crea il volume con 2 repliche
+      ansible.builtin.command:
+        argv: [kubectl, -n, test-web, wait, "--for=jsonpath={.status.phase}=Bound", pvc/web-data, --timeout=120s]
+      changed_when: false
+
+    - name: Attendi che il pod nginx sia pronto
+      ansible.builtin.command: kubectl -n test-web rollout status deploy/web --timeout=300s
+      changed_when: false
+
+    - name: Mostra su quale nodo gira il pod
+      ansible.builtin.command: kubectl -n test-web get pod -o wide
+      register: web_pod
+      changed_when: false
+
+    - name: Pod
+      ansible.builtin.debug:
+        var: web_pod.stdout_lines
+
+    - name: Mostra il Service (EXTERNAL-IP = web_ip)
+      ansible.builtin.command: kubectl -n test-web get svc web
+      register: web_svc
+      changed_when: false
+
+    - name: Service
+      ansible.builtin.debug:
+        var: web_svc.stdout_lines
+
+    - name: Richiedi la pagina sull'IP unico #stesso IP a prescindere da quale nodo lo annuncia o su quale nodo gira il pod
+      ansible.builtin.uri:
+        url: "http://{{ web_ip }}"
+        return_content: true
+      register: web_page
+      until: web_page.status == 200
+      retries: 10
+      delay: 5
+
+    - name: Pagina servita
+      ansible.builtin.debug:
+        msg: "{{ web_ip }}: {{ web_page.content | trim }}"
+
+- name: Pulizia test web #parte solo con --tags cleanup
+  hosts: cp1
+  become: true
+  tags: [cleanup, never]
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Elimina il namespace test-web (pod, PVC e volume Longhorn)
+      ansible.builtin.command: kubectl delete namespace test-web --ignore-not-found --wait=true
+      changed_when: false

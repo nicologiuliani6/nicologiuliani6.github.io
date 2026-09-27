@@ -1,0 +1,118 @@
+- name: Preparazione nodi Kubernetes
+  hosts: k8s
+  become: true
+  vars:
+    k8s_version: "v1.34"   # verifica l'ultima stabile su kubernetes.io e adatta
+  tasks:
+    - name: Disabilita swap a runtime #kube non si avvia se c'è swap attivo
+      ansible.builtin.command: swapoff -a
+      when: ansible_facts.swaptotal_mb > 0
+
+    - name: Commenta swap in fstab #al riavvio non deve essere montata
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: '^([^#].*\sswap\s.*)$'
+        replace: '# \1'
+
+    - name: Moduli kernel al boot #carica al avvio i moduli necessari per kube (overlay come fs e br_netfilter per il networking)
+      ansible.builtin.copy:
+        dest: /etc/modules-load.d/k8s.conf
+        content: |
+          overlay
+          br_netfilter
+
+    - name: Carica i moduli ora #carichiamo i moduli senza riavviare
+      ansible.builtin.command: "modprobe {{ item }}"
+      loop: [overlay, br_netfilter]
+      changed_when: false
+
+    - name: Sysctl per Kubernetes #abilita il forwarding dei pacchetti e le regole iptables per i bridge
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-k8s.conf
+        content: |
+          net.bridge.bridge-nf-call-iptables = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.ipv4.ip_forward = 1
+      register: sysctl_conf
+
+    - name: Applica sysctl #richiara le regole sysctl senza riavviare
+      ansible.builtin.command: sysctl --system
+      when: sysctl_conf.changed
+
+    - name: Pacchetti base e containerd #installa i pacchetti necessari per il funzionamento di containerd e Kubernetes
+      ansible.builtin.apt:
+        name: [apt-transport-https, ca-certificates, curl, gpg, containerd]
+        state: present
+        update_cache: true
+
+    - name: Directory config containerd #crea la directory per la configurazione di containerd
+      ansible.builtin.file:
+        path: /etc/containerd
+        state: directory
+        mode: "0755"
+
+    - name: Controlla se config containerd e' completa #il pacchetto Debian installa un config.toml minimale (senza SystemdCgroup), quindi "creates:" non basta
+      ansible.builtin.command: grep -q SystemdCgroup /etc/containerd/config.toml
+      register: containerd_cfg
+      failed_when: false
+      changed_when: false
+
+    - name: Genera config di default containerd
+      ansible.builtin.shell: containerd config default > /etc/containerd/config.toml
+      when: containerd_cfg.rc != 0
+
+    - name: Abilita SystemdCgroup #containerd di default usa cgroupfs, ma kube preferisce systemd come gestore dei cgroup, quindi modifichiamo la config
+      ansible.builtin.replace:
+        path: /etc/containerd/config.toml
+        regexp: 'SystemdCgroup = false'
+        replace: 'SystemdCgroup = true'
+      notify: Restart containerd
+
+    - name: Directory plugin CNI #il containerd Debian cerca i plugin CNI in /usr/lib/cni, ma Calico li installa in /opt/cni/bin: senza questo i pod restano in ContainerCreating ("failed to find plugin calico")
+      ansible.builtin.replace:
+        path: /etc/containerd/config.toml
+        regexp: 'bin_dir = "/usr/lib/cni"'
+        replace: 'bin_dir = "/opt/cni/bin"'
+      notify: Restart containerd
+
+    - name: Keyring directory #crea la directory per le chiavi dei repository APT
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Chiave repo Kubernetes #scarica la chiave del repository Kubernetes e la salva in /etc/apt/keyrings
+      ansible.builtin.get_url:
+        url: "https://pkgs.k8s.io/core:/stable:/{{ k8s_version }}/deb/Release.key"
+        dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
+        mode: "0644"
+
+    - name: Repo Kubernetes #crea il file /etc/apt/sources.list.d/kubernetes.list con il repository Kubernetes
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/kubernetes.list
+        content: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/{{ k8s_version }}/deb/ /\n"
+
+    - name: Installa kubelet kubeadm kubectl 
+      ansible.builtin.apt:
+        name: [kubelet, kubeadm, kubectl]
+        state: present
+        update_cache: true
+
+    - name: Hold dei pacchetti k8s #blocchiamo al'aggiornamento automatico i pacchetti kubelet, kubeadm e kubectl, così non si aggiornano senza il nostro consenso via APT
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop: [kubelet, kubeadm, kubectl]
+
+    - name: Abilita servizi #abilita e avvia i servizi containerd e kubelet
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop: [containerd, kubelet]
+
+  handlers: 
+    - name: Restart containerd
+      ansible.builtin.systemd:
+        name: containerd
+        state: restarted

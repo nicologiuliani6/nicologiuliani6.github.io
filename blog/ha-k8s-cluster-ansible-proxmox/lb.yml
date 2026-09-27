@@ -1,0 +1,88 @@
+- name: Load balancer HA sui control plane (keepalived + haproxy)
+  hosts: control_plane
+  become: true
+  tasks:
+    - name: Installa keepalived e haproxy #solo su i nodi control plane installiamo keepalived e haproxy
+      ansible.builtin.apt:
+        name: [keepalived, haproxy]
+        state: present
+        update_cache: true
+
+    - name: Configurazione haproxy #da doc
+      ansible.builtin.copy:
+        dest: /etc/haproxy/haproxy.cfg
+        content: |
+          global
+              log /dev/log local0
+              maxconn 2000
+          defaults
+              mode tcp
+              log global
+              option tcplog
+              timeout connect 5s
+              timeout client 30s
+              timeout server 30s
+          frontend k8s_api
+              bind *:{{ vip_port }}
+              default_backend k8s_api_be
+          backend k8s_api_be
+              option httpchk GET /healthz
+              http-check expect status 200
+              balance roundrobin
+              default-server inter 3s fall 3 rise 2
+          {% for h in groups['control_plane'] %}
+              server {{ h }} {{ hostvars[h].ansible_facts.default_ipv4.address }}:6443 check check-ssl verify none
+          {% endfor %}
+      notify: Restart haproxy #se file di configurazione è cambiato, riavvia il servizio haproxy
+
+    - name: Configurazione keepalived #da doc
+      ansible.builtin.copy:
+        dest: /etc/keepalived/keepalived.conf
+        content: |
+          global_defs {
+              router_id {{ inventory_hostname }}
+              enable_script_security
+              script_user root
+          }
+          vrrp_script check_haproxy {
+              script "/usr/bin/pgrep -x haproxy"
+              interval 2
+              fall 2
+              rise 2
+          }
+          vrrp_instance VI_1 {
+              state BACKUP
+              interface {{ ansible_facts.default_ipv4.interface }}
+              virtual_router_id 51
+              priority {{ 150 - 10 * groups['control_plane'].index(inventory_hostname) }}
+              advert_int 1
+              authentication {
+                  auth_type PASS
+                  auth_pass {{ vrrp_pass }}
+              }
+              virtual_ipaddress {
+                  {{ vip }}
+              }
+              track_script {
+                  check_haproxy
+              }
+          }
+      notify: Restart keepalived #se file di configurazione è cambiato, riavvia il servizio keepalived
+
+    - name: Abilita e avvia i servizi
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop: [haproxy, keepalived]
+
+  handlers: #riavvia i servizi se i file di configurazione sono cambiati
+    - name: Restart haproxy
+      ansible.builtin.systemd:
+        name: haproxy
+        state: restarted
+
+    - name: Restart keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        state: restarted

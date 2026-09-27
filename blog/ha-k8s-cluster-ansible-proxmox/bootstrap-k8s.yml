@@ -1,0 +1,116 @@
+- name: Init del primo control plane #avviamo il primo nodo control plane e generiamo i comandi per far joinare gli altri nodi
+  hosts: cp1
+  become: true
+  tags: [init]
+  tasks:
+    - name: kubeadm init #dice a kubeadm che l'indirizzo "ufficiale" del cluster e' {{ vip }} (group_vars/all.yml) ovvero il loadbalancer NON il cp1. Poi dice a kubeadm che il range di indirizzi dei pod sarà 10.244.0.0/16
+      ansible.builtin.command: >
+        kubeadm init
+        --control-plane-endpoint {{ vip }}:{{ vip_port }} 
+        --pod-network-cidr {{ pod_cidr }}
+      args: #esegue il comando solo se non esiste già il file /etc/kubernetes/admin.conf, che viene creato da kubeadm init. Se presente, significa che il nodo è già stato inizializzato e quindi non serve rieseguirlo.
+        creates: /etc/kubernetes/admin.conf
+
+    - name: Comando di join #genera un nuovo token di autenticazione e stampa il comando completo che un altro nodo dovrà eseguire per unirsi al cluster
+      ansible.builtin.command: kubeadm token create --print-join-command
+      register: join_out
+      changed_when: false #non contare mai questo task come "changed", perche generare il comando di join non cambia lo stato del nodo, serve solo a stampare il comando da usare per far joinare gli altri nodi al cluster
+
+    - name: Chiave certificati per i join dei control plane #I certificati del control plane (quelli di etcd, apiserver, ecc.) sono privati e non passano nel token normale. Questo comando li carica cifrati come Secret temporaneo nel cluster e restituisce una chiave per decifrarli. Solo cp2 e cp3, che diventeranno control plane, avranno bisogno di questa chiave; i worker no.
+      ansible.builtin.command: kubeadm init phase upload-certs --upload-certs
+      register: cert_out
+      changed_when: false #non contare mai questo task come "changed", perche generare la chiave dei certificati non cambia lo stato del nodo, serve solo a stampare la chiave da usare per far joinare gli altri control plane al cluster
+
+    - name: Salva i valori per gli altri nodi
+      ansible.builtin.set_fact: #crea due variabili nuove, disponibili per il resto dell'esecuzione di Ansible
+        join_cmd: "{{ join_out.stdout }}" #prende il comando di join generato dal task precedente e lo salva in una variabile chiamata join_cmd, che sarà disponibile per tutti gli altri nodi
+        cert_key: "{{ cert_out.stdout_lines[-1] }}" #prende l'ultima riga dell'output del task precedente (che contiene la chiave dei certificati) e la salva in una variabile chiamata cert_key, che sarà disponibile per tutti gli altri nodi
+
+- name: Join degli altri control plane
+  hosts: cp2,cp3 #solo sei restanti control plane devono eseguire il join come control plane, i worker no
+  become: true
+  serial: 1 #su un cp alla volta, per evitare che tutti i control plane facciano il join contemporaneamente e generino conflitti
+  tags: [join_cp]
+  tasks:
+    - name: kubeadm join come control plane #cp2, cp3 eseguono il join come control plane, usando il comando generato da cp1 e la chiave dei certificati generata da cp1
+      ansible.builtin.command: >
+        {{ hostvars['cp1'].join_cmd }} --control-plane
+        --certificate-key {{ hostvars['cp1'].cert_key }}
+      args:
+        creates: /etc/kubernetes/kubelet.conf #se il file /etc/kubernetes/kubelet.conf esiste già, significa che il nodo è già stato inizializzato e quindi non serve rieseguirlo.
+
+- name: Join dei worker #esegue su w1, w2 in parallelo
+  hosts: workers
+  become: true
+  tags: [join_workers]
+  tasks:
+    - name: kubeadm join come worker #in automatico kubeadm capisce che abbiamo join come worker, usando il comando generato da cp1
+      ansible.builtin.command: "{{ hostvars['cp1'].join_cmd }}"
+      args:
+        creates: /etc/kubernetes/kubelet.conf
+
+- name: CNI Calico e kubeconfig #solo su c1
+  hosts: cp1
+  become: true
+  tags: [cni]
+  environment: #imposta la variabile d'ambiente KUBECONFIG, che dice a kubectl dove trovare il file di configurazione del cluster. In questo modo non serve usare l'opzione --kubeconfig ogni volta che eseguiamo un comando kubectl
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Operator Calico #installazione come da doc 
+      ansible.builtin.command: >
+        kubectl apply --server-side -f
+        https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml
+      changed_when: false #apply e' idempotente: evita il "changed" a ogni run
+
+    - name: Configurazione Calico #Scrive un secondo file YAML sul nodo, questa volta con le impostazioni concrete: dice all'operator "usa questo CIDR per gli IP dei pod, incapsula il traffico con VXLAN (un tunnel tra i nodi), fai NAT in uscita per il traffico verso internet, applica a tutti i nodi"
+      ansible.builtin.copy:
+        dest: /root/calico-cr.yaml
+        content: |
+          apiVersion: operator.tigera.io/v1
+          kind: Installation
+          metadata:
+            name: default
+          spec:
+            calicoNetwork:
+              ipPools:
+                - cidr: {{ pod_cidr }}
+                  encapsulation: VXLAN
+                  natOutgoing: Enabled
+                  nodeSelector: all()
+          ---
+          apiVersion: operator.tigera.io/v1
+          kind: APIServer
+          metadata:
+            name: default
+          spec: {}
+
+    - name: Applica Calico (riprova finché le CRD sono pronte) #applichiamo il file di configurazione appena scritto, ma aspettiamo che le CRD siano pronte, altrimenti kubectl fallisce. Per questo motivo riproviamo fino a 10 volte, con 10 secondi di attesa tra un tentativo e l'altro
+      ansible.builtin.command: kubectl apply -f /root/calico-cr.yaml
+      register: calico_apply
+      until: calico_apply.rc == 0
+      retries: 10
+      delay: 10
+      changed_when: false
+
+    - name: Directory .kube per l'utente #Crea ~/.kube per l'utente debian
+      ansible.builtin.file:
+        path: "/home/{{ ansible_user }}/.kube"
+        state: directory
+        owner: "{{ ansible_user }}"
+        mode: "0755"
+
+    - name: Copia kubeconfig #Copia il file di configurazione del cluster nella directory .kube dell'utente
+      ansible.builtin.copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "/home/{{ ansible_user }}/.kube/config"
+        remote_src: true #abbiamo una copia LOCALE non un trasferimento
+        owner: "{{ ansible_user }}"
+        mode: "0600" #permessi SOLO per l'utente, altrimenti kubectl si lamenta e non funziona. Abbiamo dentro credenziali amministratore del cluster, quindi non vogliamo che altri utenti possano leggerle.
+
+    - name: Attendi che tutti i nodi siano Ready #Ultimo task: aspetta fino a 10 minuti che tutti i nodi risultino Ready
+      ansible.builtin.command: kubectl wait --for=condition=Ready nodes --all --timeout=600s
+      changed_when: false
+
+    - name: Attendi che tutti i pod siano Ready #i nodi Ready non bastano: se il plugin CNI e' rotto i pod restano in ContainerCreating (CoreDNS, calico-kube-controllers...)
+      ansible.builtin.command: kubectl wait --for=condition=Ready pod --all -A --timeout=600s
+      changed_when: false

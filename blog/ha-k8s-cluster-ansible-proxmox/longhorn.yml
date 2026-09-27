@@ -1,0 +1,68 @@
+- name: Prerequisiti Longhorn sui worker #Longhorn espone i volumi ai pod via iSCSI (e RWX via NFS), quindi servono questi pacchetti sui nodi dove girano i pod
+  hosts: workers
+  become: true
+  tags: [prereq]
+  tasks:
+    - name: Pacchetti iSCSI e NFS
+      ansible.builtin.apt:
+        name: [open-iscsi, nfs-common]
+        state: present
+        update_cache: true
+
+    - name: Modulo kernel iscsi_tcp al boot
+      ansible.builtin.copy:
+        dest: /etc/modules-load.d/longhorn.conf
+        content: "iscsi_tcp\n"
+
+    - name: Carica il modulo ora
+      ansible.builtin.command: modprobe iscsi_tcp
+      changed_when: false
+
+    - name: Abilita e avvia iscsid
+      ansible.builtin.systemd:
+        name: iscsid
+        enabled: true
+        state: started
+
+- name: Installa Longhorn #solo su cp1: e' kubectl che parla con il cluster, i manager Longhorn partono da soli sui worker (i control plane hanno il taint NoSchedule)
+  hosts: cp1
+  become: true
+  tags: [install]
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Scarica il manifest ufficiale
+      ansible.builtin.get_url:
+        url: "https://raw.githubusercontent.com/longhorn/longhorn/{{ longhorn_version }}/deploy/longhorn.yaml"
+        dest: /root/longhorn.yaml
+        mode: "0644"
+
+    - name: Numero repliche della StorageClass #il manifest usa 3 repliche: con meno di 3 worker i volumi resterebbero "degraded". Cambia longhorn_replicas in group_vars quando aggiungi worker
+      ansible.builtin.replace:
+        path: /root/longhorn.yaml
+        regexp: 'numberOfReplicas: "\d+"'
+        replace: 'numberOfReplicas: "{{ longhorn_replicas }}"'
+
+    - name: Applica Longhorn
+      ansible.builtin.command: kubectl apply -f /root/longhorn.yaml
+      changed_when: false #apply e' idempotente
+
+    - name: Attendi i manager Longhorn (uno per worker)
+      ansible.builtin.command: kubectl -n longhorn-system rollout status ds/longhorn-manager --timeout=600s
+      changed_when: false
+
+    - name: Attendi il driver CSI
+      ansible.builtin.command: kubectl -n longhorn-system rollout status deploy/longhorn-driver-deployer --timeout=600s
+      changed_when: false
+
+    - name: Attendi che tutti i pod Longhorn siano Ready #il driver CSI crea altri pod dopo, quindi riproviamo finche' non sono tutti Ready
+      ansible.builtin.command: kubectl -n longhorn-system wait --for=condition=Ready pod --all --timeout=60s
+      register: lh_ready
+      until: lh_ready.rc == 0
+      retries: 10
+      delay: 10
+      changed_when: false
+
+    - name: Verifica StorageClass longhorn
+      ansible.builtin.command: kubectl get storageclass longhorn
+      changed_when: false

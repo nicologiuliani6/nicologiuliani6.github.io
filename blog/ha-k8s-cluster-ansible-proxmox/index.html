@@ -1,0 +1,1025 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Let's build a k8s cluster with Ansible — Nicolò Giuliani</title>
+<meta name="description" content="A file-by-file walkthrough of the Ansible project behind a 5-node HA Kubernetes cluster on Proxmox: inventory, node prep, a keepalived+haproxy load balancer, kubeadm bootstrap, Longhorn storage, MetalLB, and a resilience test — with the real files to download.">
+<meta name="author" content="Nicolò Giuliani">
+<link rel="canonical" href="https://nicologiuliani.site/blog/ha-k8s-cluster-ansible-proxmox/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Let's build a k8s cluster with Ansible">
+<meta property="og:description" content="A file-by-file walkthrough of the Ansible project behind a 5-node HA Kubernetes cluster on Proxmox: inventory, node prep, a keepalived+haproxy load balancer, kubeadm bootstrap, Longhorn storage, MetalLB, and a resilience test — with the real files to download.">
+<meta property="og:url" content="https://nicologiuliani.site/blog/ha-k8s-cluster-ansible-proxmox/">
+<meta property="og:image" content="https://nicologiuliani.site/assets/og.png">
+<meta property="article:published_time" content="2026-09-27">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nicologiuliani.site/assets/og.png">
+<meta name="twitter:title" content="Let's build a k8s cluster with Ansible">
+<meta name="twitter:description" content="A file-by-file walkthrough of the Ansible project behind a 5-node HA Kubernetes cluster on Proxmox: inventory, node prep, a keepalived+haproxy load balancer, kubeadm bootstrap, Longhorn storage, MetalLB, and a resilience test — with the real files to download.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Let's build a k8s cluster with Ansible",
+  "datePublished": "2026-09-27",
+  "url": "https://nicologiuliani.site/blog/ha-k8s-cluster-ansible-proxmox/",
+  "author": { "@type": "Person", "name": "Nicolò Giuliani", "url": "https://nicologiuliani.site/" }
+}
+</script>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<main>
+<a class="back-link" href="/blog/">← Blog</a>
+
+<header>
+<h1>Let's build a k8s cluster with Ansible</h1>
+<p class="post-meta"><time datetime="2026-09-27">27 September 2026</time></p>
+</header>
+
+<article class="post-body">
+
+<p>As part of my HPC curricular internship at <strong>Cineca</strong> — infrastructure, lifecycle
+management and security hardening for HPC services on Kubernetes — I built a digital twin of a
+production-style cluster on my own homelab hardware, fully provisioned with Ansible. Goal: a
+highly-available Kubernetes cluster (3 control plane + 2 workers), replicated storage, and a
+service reachable through a single stable IP even if a node dies — all reproducible from scratch,
+never clicked by hand.</p>
+
+<h2>Infrastructure</h2>
+
+<p>Host: a Dell R720 — 2× Intel Xeon E5-2650 v2 (16 cores / 32 threads total), 144 GB RAM. Storage:
+10× 1 TB SAS disks in a ZFS <code>raidz2</code> pool (<code>tank</code>, tolerates 2 disk
+failures), a 250 GB HDD dedicated to Proxmox itself.</p>
+
+<p>Five VMs cloned from a Debian 13 cloud-init template onto <code>tank</code>, each 2 vCPU / 2 GB
+RAM / 1 TB thin disk, hostname <code>nodeN</code>, fixed MAC → fixed IP via DHCP reservation:</p>
+
+<table>
+<thead><tr><th>Nodes</th><th>Role</th><th>IP</th></tr></thead>
+<tbody>
+<tr><td>node1–3</td><td>control plane (cp1–3)</td><td>192.168.88.21–23</td></tr>
+<tr><td>node4–5</td><td>workers (w1–2)</td><td>192.168.88.24–25</td></tr>
+</tbody>
+</table>
+
+<p>Software: Kubernetes v1.34 (kubeadm), containerd 1.7, Calico v3.30 as CNI, Longhorn v1.12 for
+storage, MetalLB v0.16 for service IPs.</p>
+
+<p>VM creation (Proxmox CLI, for N = 1..5):</p>
+
+<pre><code>qm clone 9000 10N --name nodeN --full 1 --storage tank
+qm set 10N --net0 virtio=BC:24:11:AA:00:0N,bridge=vmbr0 --onboot 1
+qm resize 10N scsi0 1T
+qm start 10N</code></pre>
+
+<p><code>qm clone --full</code> makes an independent copy of the template's disk, so the template
+can be deleted later without breaking the VMs. <code>qm set --net0</code> pins the interface's MAC
+address to a per-node value (<code>...:01</code> through <code>...:05</code>), which is what the
+router's DHCP reservation matches to hand out the same IP every time. <code>qm resize</code> grows
+the thin-provisioned disk to 1 TB — thin, so <code>tank</code> only allocates space as data is
+actually written. <code>qm start</code> boots the VM and hands off to cloud-init, which sets the
+hostname, installs the SSH key and brings up networking.</p>
+
+<h2>Node preparation</h2>
+
+<p>The whole project is a handful of Ansible files that run in a fixed order, plus one file of
+shared variables. Each one below is walked through piece by piece — comments stripped from the
+snippets, explained in the text instead — with a link at the end to download the real file. Quick
+map, same order everything runs in:</p>
+
+<table id="file-map">
+<thead><tr><th>File</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><a href="#inventory"><code>inventory.ini</code></a></td><td>hosts and groups</td></tr>
+<tr><td><a href="#updateapt"><code>updateAPT.yml</code></a></td><td>apt update/upgrade, one node at a time</td></tr>
+<tr><td><a href="#prep-k8s"><code>prep-k8s.yml</code></a></td><td>containerd + kubeadm prerequisites</td></tr>
+<tr><td><a href="#group-vars"><code>group_vars/all.yml</code></a></td><td>shared variables (VIP, versions, pools)</td></tr>
+<tr><td><a href="#lb"><code>lb.yml</code></a></td><td>VIP + load balancer for the API server</td></tr>
+<tr><td><a href="#bootstrap-k8s"><code>bootstrap-k8s.yml</code></a></td><td>init, join, CNI</td></tr>
+<tr><td><a href="#longhorn"><code>longhorn.yml</code></a></td><td>replicated storage</td></tr>
+<tr><td><a href="#test-web"><code>test-web.yml</code></a></td><td>MetalLB, test service, resilience test</td></tr>
+</tbody>
+</table>
+
+<h3 id="inventory"><code>inventory.ini</code></h3>
+
+<p><em>What it does: lists every node, grouped by role, and how Ansible connects to them.</em></p>
+
+<p>Before any playbook, Ansible needs to know which hosts exist and how to reach them. This is
+what <code>hosts: k8s</code> in every playbook actually refers to.</p>
+
+<pre><code>[control_plane]
+cp1 ansible_host=node1.pve.homelab.nicologiuliani.site
+cp2 ansible_host=node2.pve.homelab.nicologiuliani.site
+cp3 ansible_host=node3.pve.homelab.nicologiuliani.site
+
+[workers]
+w1 ansible_host=node4.pve.homelab.nicologiuliani.site
+w2 ansible_host=node5.pve.homelab.nicologiuliani.site
+
+[k8s:children]
+control_plane
+workers
+
+[k8s:vars]
+ansible_user=debian
+ansible_ssh_private_key_file=ssh_key/id_ed25519
+ansible_ssh_common_args='-o StrictHostKeyChecking=accept-new'</code></pre>
+
+<p>Each line in <code>[control_plane]</code> and <code>[workers]</code> gives a short alias
+(<code>cp1</code>, <code>w1</code>...) to an actual node, resolved through
+<code>ansible_host</code> to its DNS name on the router. The alias is what later playbooks and
+<code>group_vars</code> files use — <code>cp1</code> instead of
+<code>node1.pve.homelab.nicologiuliani.site</code> — and it's also what makes a node's role
+explicit: moving a host between <code>[control_plane]</code> and <code>[workers]</code> is a
+one-line edit, not a rename.</p>
+
+<p><code>[k8s:children]</code> merges both groups into one, <code>k8s</code>, which is the group
+every playbook in this project actually targets (<code>hosts: k8s</code>) — no play needs to list
+control plane and workers separately just to run against all five nodes. <code>[k8s:vars]</code>
+applies to every host in that merged group: the SSH user cloud-init created
+(<code>debian</code>), the path to the private half of the key pair generated for this cluster,
+and <code>StrictHostKeyChecking=accept-new</code> so Ansible accepts a new node's host key on
+first contact instead of stopping to ask.</p>
+
+<p><a href="inventory.ini">Download inventory.ini →</a> · <a href="#file-map">↑ file map</a></p>
+
+<h3 id="updateapt"><code>updateAPT.yml</code></h3>
+
+<p><em>What it does: updates and upgrades every node via apt, rebooting one node at a time only if
+the update actually requires it.</em></p>
+
+<pre><code>- name: Aggiorna i nodi con APT
+  hosts: k8s
+  become: true
+  serial: 1</code></pre>
+
+<p><code>serial: 1</code> runs this whole play on one node at a time instead of all five in
+parallel — the point is to never reboot every node together.</p>
+
+<pre><code>  tasks:
+    - name: Aggiorna la cache apt
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Upgrade di tutti i pacchetti
+      ansible.builtin.apt:
+        upgrade: dist
+        autoremove: true
+        autoclean: true</code></pre>
+
+<p>Refreshes the apt cache (reusing it if it's under an hour old), then a full
+<code>dist-upgrade</code>, dropping packages that are no longer needed and clearing the local
+package cache afterwards.</p>
+
+<pre><code>    - name: Controlla se serve il reboot
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: reboot_required
+
+    - name: Riavvia se necessario
+      ansible.builtin.reboot:
+        reboot_timeout: 600
+      when: reboot_required.stat.exists</code></pre>
+
+<p>Debian itself drops <code>/var/run/reboot-required</code> when an update (typically the kernel)
+needs a reboot to take effect. This checks for that file and only reboots when it's actually there,
+waiting up to 10 minutes for the node to come back — combined with <code>serial: 1</code> above,
+that's what keeps a kernel update from taking down the whole cluster's worth of nodes at once.</p>
+
+<p><a href="updateAPT.yml">Download updateAPT.yml →</a> · <a href="#file-map">↑ file map</a></p>
+
+<h3 id="prep-k8s"><code>prep-k8s.yml</code></h3>
+
+<p><em>What it does: turns a bare Debian node into one <code>kubeadm</code> can use — kernel
+modules, sysctl, containerd configured correctly, and the kubelet/kubeadm/kubectl packages
+installed and held.</em></p>
+
+<pre><code>- name: Preparazione nodi Kubernetes
+  hosts: k8s
+  become: true
+  vars:
+    k8s_version: "v1.34"</code></pre>
+
+<p>The Kubernetes version is a variable, set once here and reused later for the apt repository URL
+— bumping the cluster version later is a one-line change. Check the latest stable release on
+kubernetes.io before reusing this on a new cluster.</p>
+
+<pre><code>  tasks:
+    - name: Disabilita swap a runtime
+      ansible.builtin.command: swapoff -a
+      when: ansible_facts.swaptotal_mb > 0
+
+    - name: Commenta swap in fstab
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: '^([^#].*\sswap\s.*)$'
+        replace: '# \1'</code></pre>
+
+<p>kubelet refuses to start with swap active. <code>swapoff -a</code> turns it off right now, but
+only runs if there's swap to turn off; commenting out the swap line in <code>fstab</code> stops it
+from being remounted on the next reboot.</p>
+
+<pre><code>    - name: Moduli kernel al boot
+      ansible.builtin.copy:
+        dest: /etc/modules-load.d/k8s.conf
+        content: |
+          overlay
+          br_netfilter
+
+    - name: Carica i moduli ora
+      ansible.builtin.command: "modprobe {{ item }}"
+      loop: [overlay, br_netfilter]
+      changed_when: false</code></pre>
+
+<p><code>overlay</code> is the filesystem containerd uses for container images;
+<code>br_netfilter</code> makes bridged traffic visible to iptables, which pod networking depends
+on. The first task makes both load on every future boot; the second loads them immediately, so a
+reboot isn't needed now. <code>changed_when: false</code> just stops Ansible from reporting a
+"change" for a <code>modprobe</code> that's a no-op if the module is already loaded.</p>
+
+<pre><code>    - name: Sysctl per Kubernetes
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/99-k8s.conf
+        content: |
+          net.bridge.bridge-nf-call-iptables = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.ipv4.ip_forward = 1
+      register: sysctl_conf
+
+    - name: Applica sysctl
+      ansible.builtin.command: sysctl --system
+      when: sysctl_conf.changed</code></pre>
+
+<p>Enables IP forwarding and lets iptables see bridged traffic — both required for pod-to-pod
+networking. <code>register</code> + <code>when: sysctl_conf.changed</code> means
+<code>sysctl --system</code> only reruns when this file actually changed, not on every single
+playbook run.</p>
+
+<pre><code>    - name: Pacchetti base e containerd
+      ansible.builtin.apt:
+        name: [apt-transport-https, ca-certificates, curl, gpg, containerd]
+        state: present
+        update_cache: true</code></pre>
+
+<p>Installs containerd itself, plus the tools needed a few tasks later to add the Kubernetes apt
+repository over HTTPS with a signed key (<code>apt-transport-https</code>,
+<code>ca-certificates</code>, <code>curl</code>, <code>gpg</code>).</p>
+
+<pre><code>    - name: Directory config containerd
+      ansible.builtin.file:
+        path: /etc/containerd
+        state: directory
+        mode: "0755"
+
+    - name: Controlla se config containerd e' completa
+      ansible.builtin.command: grep -q SystemdCgroup /etc/containerd/config.toml
+      register: containerd_cfg
+      failed_when: false
+      changed_when: false
+
+    - name: Genera config di default containerd
+      ansible.builtin.shell: containerd config default > /etc/containerd/config.toml
+      when: containerd_cfg.rc != 0
+
+    - name: Abilita SystemdCgroup
+      ansible.builtin.replace:
+        path: /etc/containerd/config.toml
+        regexp: 'SystemdCgroup = false'
+        replace: 'SystemdCgroup = true'
+      notify: Restart containerd</code></pre>
+
+<p>Debian's containerd package ships a minimal <code>config.toml</code> that doesn't even mention
+<code>SystemdCgroup</code>, so a plain "does this file exist" check isn't enough — hence the
+<code>grep</code>, with <code>failed_when: false</code> so a no-match isn't treated as an error.
+If the setting isn't in there, the full default config is generated first. Then
+<code>SystemdCgroup</code> is flipped to <code>true</code>: containerd defaults to the
+<code>cgroupfs</code> cgroup driver, kubelet expects <code>systemd</code>, and that mismatch is
+fatal to the control plane. The <code>notify</code> queues a containerd restart, but only if this
+task actually changed the file.</p>
+
+<pre><code>    - name: Directory plugin CNI
+      ansible.builtin.replace:
+        path: /etc/containerd/config.toml
+        regexp: 'bin_dir = "/usr/lib/cni"'
+        replace: 'bin_dir = "/opt/cni/bin"'
+      notify: Restart containerd</code></pre>
+
+<p>containerd's default CNI plugin directory on Debian is <code>/usr/lib/cni</code>, but Calico
+installs its plugins into <code>/opt/cni/bin</code>. Without this, pods stay in
+<code>ContainerCreating</code> with <code>failed to find plugin "calico"</code>. Same
+restart-on-change pattern as above.</p>
+
+<pre><code>    - name: Keyring directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: "0755"
+
+    - name: Chiave repo Kubernetes
+      ansible.builtin.get_url:
+        url: "https://pkgs.k8s.io/core:/stable:/{{ k8s_version }}/deb/Release.key"
+        dest: /etc/apt/keyrings/kubernetes-apt-keyring.asc
+        mode: "0644"
+
+    - name: Repo Kubernetes
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/kubernetes.list
+        content: "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.asc] https://pkgs.k8s.io/core:/stable:/{{ k8s_version }}/deb/ /\n"</code></pre>
+
+<p>Standard signed-by apt repository setup for the official Kubernetes packages: fetch the signing
+key, drop it in <code>/etc/apt/keyrings</code>, then point a <code>sources.list.d</code> entry at
+it — both URLs built from the same <code>k8s_version</code> variable set at the top of the file.</p>
+
+<pre><code>    - name: Installa kubelet kubeadm kubectl
+      ansible.builtin.apt:
+        name: [kubelet, kubeadm, kubectl]
+        state: present
+        update_cache: true
+
+    - name: Hold dei pacchetti k8s
+      ansible.builtin.dpkg_selections:
+        name: "{{ item }}"
+        selection: hold
+      loop: [kubelet, kubeadm, kubectl]
+
+    - name: Abilita servizi
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop: [containerd, kubelet]
+
+  handlers:
+    - name: Restart containerd
+      ansible.builtin.systemd:
+        name: containerd
+        state: restarted</code></pre>
+
+<p>Installs the three Kubernetes binaries, then <code>hold</code>s them at the dpkg level — without
+this, the <code>updateAPT.yml</code> dist-upgrade above would be free to bump kubelet out from
+under a running cluster. Last task enables and starts containerd and kubelet. The handler at the
+bottom is what actually restarts containerd; it only fires because one of the two
+<code>notify: Restart containerd</code> tasks earlier changed the config, and Ansible handlers run
+once, after all tasks, no matter how many tasks notified them.</p>
+
+<p><a href="prep-k8s.yml">Download prep-k8s.yml →</a> · <a href="#file-map">↑ file map</a></p>
+
+<h3 id="group-vars"><code>group_vars/all.yml</code></h3>
+
+<p><em>What it does: one file of shared values — VIP, versions, storage pools — that every
+playbook in the project can read.</em></p>
+
+<p>Ansible loads anything under <code>group_vars/</code> automatically, no include needed; the
+values below become variables usable as <code>{{ vip }}</code> etc. in any playbook. The real
+file also carries a <code>vrrp_pass</code> value (the shared secret the three keepalived instances
+use to authenticate each other over VRRP) — redacted to a placeholder here and in the downloadable
+copy, since this repo is public.</p>
+
+<pre><code>vip: "192.168.88.20"
+vip_port: 8443
+vrrp_pass: "CHANGE_ME"
+
+pod_cidr: "10.244.0.0/16"
+calico_version: "v3.30.3"
+
+longhorn_version: "v1.12.1"
+longhorn_replicas: 2
+
+metallb_version: "v0.16.1"
+metallb_pool: "192.168.88.40-192.168.88.49"
+web_ip: "192.168.88.40"</code></pre>
+
+<p><code>vip</code>/<code>vip_port</code> are the address <code>lb.yml</code> sets up next.
+<code>pod_cidr</code> and <code>calico_version</code> feed the CNI install in
+<code>bootstrap-k8s.yml</code>. <code>longhorn_replicas</code> is 2 because there are 2 workers
+right now — the comment in the real file is a reminder to raise it to 3 once a third worker
+exists. <code>metallb_pool</code> and <code>web_ip</code> are consumed by <code>test-web.yml</code>;
+the pool sits outside both the DHCP range and the five nodes' addresses, so nothing else on the LAN
+can be handed one of those IPs by accident.</p>
+
+<p><a href="group_vars/all.yml">Download group_vars/all.yml →</a> · <a href="#file-map">↑ file map</a></p>
+
+<h3 id="lb"><code>lb.yml</code></h3>
+
+<p><em>What it does: puts keepalived and haproxy on the three control-plane nodes, so the
+Kubernetes API stays reachable on one address even if one of them goes down.</em></p>
+
+<pre><code>- name: Load balancer HA sui control plane (keepalived + haproxy)
+  hosts: control_plane
+  become: true
+  tasks:
+    - name: Installa keepalived e haproxy
+      ansible.builtin.apt:
+        name: [keepalived, haproxy]
+        state: present
+        update_cache: true</code></pre>
+
+<p><code>hosts: control_plane</code> — this play only touches the three control-plane nodes, not
+the workers. keepalived will hold the shared VIP; haproxy will sit behind it and spread API
+requests across the three apiservers.</p>
+
+<pre><code>    - name: Configurazione haproxy
+      ansible.builtin.copy:
+        dest: /etc/haproxy/haproxy.cfg
+        content: |
+          global
+              log /dev/log local0
+              maxconn 2000
+          defaults
+              mode tcp
+              log global
+              option tcplog
+              timeout connect 5s
+              timeout client 30s
+              timeout server 30s
+          frontend k8s_api
+              bind *:{{ vip_port }}
+              default_backend k8s_api_be
+          backend k8s_api_be
+              option httpchk GET /healthz
+              http-check expect status 200
+              balance roundrobin
+              default-server inter 3s fall 3 rise 2
+          {% for h in groups['control_plane'] %}
+              server {{ h }} {{ hostvars[h].ansible_facts.default_ipv4.address }}:6443 check check-ssl verify none
+          {% endfor %}
+      notify: Restart haproxy</code></pre>
+
+<p>Plain TCP load balancing (<code>mode tcp</code> — haproxy isn't trying to read the encrypted
+API traffic, just forward it). It listens on <code>{{ vip_port }}</code> (8443, from
+<code>group_vars/all.yml</code>) and round-robins across a backend built with a Jinja loop over
+<code>groups['control_plane']</code> — so adding a fourth control-plane node to the inventory is
+enough for it to show up here too, no manual edit. Each backend server is health-checked against
+the apiserver's own <code>/healthz</code> endpoint on port 6443; a server that fails 3 checks in a
+row is pulled out of rotation, and needs 2 good checks to go back in.</p>
+
+<pre><code>    - name: Configurazione keepalived
+      ansible.builtin.copy:
+        dest: /etc/keepalived/keepalived.conf
+        content: |
+          global_defs {
+              router_id {{ inventory_hostname }}
+              enable_script_security
+              script_user root
+          }
+          vrrp_script check_haproxy {
+              script "/usr/bin/pgrep -x haproxy"
+              interval 2
+              fall 2
+              rise 2
+          }
+          vrrp_instance VI_1 {
+              state BACKUP
+              interface {{ ansible_facts.default_ipv4.interface }}
+              virtual_router_id 51
+              priority {{ 150 - 10 * groups['control_plane'].index(inventory_hostname) }}
+              advert_int 1
+              authentication {
+                  auth_type PASS
+                  auth_pass {{ vrrp_pass }}
+              }
+              virtual_ipaddress {
+                  {{ vip }}
+              }
+              track_script {
+                  check_haproxy
+              }
+          }
+      notify: Restart keepalived</code></pre>
+
+<p>Every node runs the same <code>vrrp_script</code>: check every 2 seconds that haproxy's process
+is actually alive on this node (<code>pgrep -x haproxy</code>) — a node with a dead haproxy has no
+business holding the VIP, even if it's otherwise healthy. All three nodes start as
+<code>BACKUP</code> — nobody is hardcoded as master — and <code>priority</code> is derived from
+each node's position in the <code>control_plane</code> group
+(<code>150, 140, 130</code> for cp1, cp2, cp3): highest priority with a passing health check wins
+the VIP. <code>auth_pass</code> is the <code>vrrp_pass</code> shared secret from
+<code>group_vars/all.yml</code>, so a rogue VRRP announcement on the LAN can't steal the VIP.
+<code>virtual_router_id 51</code> just has to be unique among any other VRRP setups on this LAN
+segment (this network doesn't have another one).</p>
+
+<pre><code>    - name: Abilita e avvia i servizi
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop: [haproxy, keepalived]
+
+  handlers:
+    - name: Restart haproxy
+      ansible.builtin.systemd:
+        name: haproxy
+        state: restarted
+
+    - name: Restart keepalived
+      ansible.builtin.systemd:
+        name: keepalived
+        state: restarted</code></pre>
+
+<p>Enables and starts both services; the two handlers only fire if their matching config file was
+actually rewritten by the tasks above.</p>
+
+<p><a href="lb.yml">Download lb.yml →</a> · <a href="#file-map">↑ file map</a></p>
+
+<h2>Cluster bootstrap</h2>
+
+<h3 id="bootstrap-k8s"><code>bootstrap-k8s.yml</code></h3>
+
+<p><em>What it does: runs <code>kubeadm init</code> on the first control plane, joins the other
+four nodes, installs Calico, and waits until every node and pod is actually
+<code>Ready</code>.</em></p>
+
+<pre><code>- name: Init del primo control plane
+  hosts: cp1
+  become: true
+  tags: [init]
+  tasks:
+    - name: kubeadm init
+      ansible.builtin.command: >
+        kubeadm init
+        --control-plane-endpoint {{ vip }}:{{ vip_port }}
+        --pod-network-cidr {{ pod_cidr }}
+      args:
+        creates: /etc/kubernetes/admin.conf</code></pre>
+
+<p>Runs only on <code>cp1</code>. The important part is
+<code>--control-plane-endpoint {{ vip }}:{{ vip_port }}</code>: it tells kubeadm the cluster's
+"official" address is the load balancer's VIP, not <code>cp1</code> itself — every other node and
+every kubeconfig will point at the VIP from here on, so any control-plane node can disappear
+without the endpoint changing. <code>--pod-network-cidr</code> reserves the pod IP range Calico
+will hand out from. <code>creates: /etc/kubernetes/admin.conf</code> makes the whole task a no-op
+if the node has already been initialized — that file is one of the first things
+<code>kubeadm init</code> writes.</p>
+
+<pre><code>    - name: Comando di join
+      ansible.builtin.command: kubeadm token create --print-join-command
+      register: join_out
+      changed_when: false
+
+    - name: Chiave certificati per i join dei control plane
+      ansible.builtin.command: kubeadm init phase upload-certs --upload-certs
+      register: cert_out
+      changed_when: false
+
+    - name: Salva i valori per gli altri nodi
+      ansible.builtin.set_fact:
+        join_cmd: "{{ join_out.stdout }}"
+        cert_key: "{{ cert_out.stdout_lines[-1] }}"</code></pre>
+
+<p><code>kubeadm token create --print-join-command</code> mints a fresh join token and prints the
+full command any node needs to join as a worker. Control-plane certificates (etcd, apiserver...)
+are private and don't travel in that plain token, so <code>upload-certs</code> encrypts them into
+a temporary Secret in the cluster and hands back a decryption key — only cp2 and cp3 need it, not
+the workers. <code>set_fact</code> saves both outputs as <code>join_cmd</code> and
+<code>cert_key</code>, which the next two plays read straight out of
+<code>hostvars['cp1']</code>. Both command tasks are marked <code>changed_when: false</code>
+because printing a join command doesn't change anything on cp1 itself.</p>
+
+<pre><code>- name: Join degli altri control plane
+  hosts: cp2,cp3
+  become: true
+  serial: 1
+  tags: [join_cp]
+  tasks:
+    - name: kubeadm join come control plane
+      ansible.builtin.command: >
+        {{ hostvars['cp1'].join_cmd }} --control-plane
+        --certificate-key {{ hostvars['cp1'].cert_key }}
+      args:
+        creates: /etc/kubernetes/kubelet.conf
+
+- name: Join dei worker
+  hosts: workers
+  become: true
+  tags: [join_workers]
+  tasks:
+    - name: kubeadm join come worker
+      ansible.builtin.command: "{{ hostvars['cp1'].join_cmd }}"
+      args:
+        creates: /etc/kubernetes/kubelet.conf</code></pre>
+
+<p>cp2 and cp3 reuse cp1's join command with <code>--control-plane</code> and the certificate key
+added, joining the etcd cluster — <code>serial: 1</code> so they don't both join at once and race
+each other. The workers just run the plain join command, and since they don't need
+certificate-key at all, Ansible runs both in parallel. Same
+<code>creates: /etc/kubernetes/kubelet.conf</code> guard on both, so re-running the playbook after
+a partial failure doesn't try to join an already-joined node.</p>
+
+<pre><code>- name: CNI Calico e kubeconfig
+  hosts: cp1
+  become: true
+  tags: [cni]
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Operator Calico
+      ansible.builtin.command: >
+        kubectl apply --server-side -f
+        https://raw.githubusercontent.com/projectcalico/calico/{{ calico_version }}/manifests/tigera-operator.yaml
+      changed_when: false</code></pre>
+
+<p>Back on cp1 only, with <code>KUBECONFIG</code> set so every <code>kubectl</code> call in this
+play just works without <code>--kubeconfig</code>. First installs the Calico operator itself,
+applied server-side (lets the API server, not <code>kubectl</code>, merge the object — the
+manifest is large).</p>
+
+<pre><code>    - name: Configurazione Calico
+      ansible.builtin.copy:
+        dest: /root/calico-cr.yaml
+        content: |
+          apiVersion: operator.tigera.io/v1
+          kind: Installation
+          metadata:
+            name: default
+          spec:
+            calicoNetwork:
+              ipPools:
+                - cidr: {{ pod_cidr }}
+                  encapsulation: VXLAN
+                  natOutgoing: Enabled
+                  nodeSelector: all()
+          ---
+          apiVersion: operator.tigera.io/v1
+          kind: APIServer
+          metadata:
+            name: default
+          spec: {}
+
+    - name: Applica Calico (riprova finché le CRD sono pronte)
+      ansible.builtin.command: kubectl apply -f /root/calico-cr.yaml
+      register: calico_apply
+      until: calico_apply.rc == 0
+      retries: 10
+      delay: 10
+      changed_when: false</code></pre>
+
+<p>The operator only defines the CRDs; this second manifest is the actual configuration —
+"use this pod CIDR, wrap inter-node traffic in a VXLAN tunnel, NAT outgoing traffic to the
+internet, apply to every node". It's applied with retries because the operator's CRDs may not be
+registered yet right after the previous task — <code>until</code> keeps trying every 10 seconds,
+up to 10 times, instead of failing on a race condition.</p>
+
+<pre><code>    - name: Directory .kube per l'utente
+      ansible.builtin.file:
+        path: "/home/{{ ansible_user }}/.kube"
+        state: directory
+        owner: "{{ ansible_user }}"
+        mode: "0755"
+
+    - name: Copia kubeconfig
+      ansible.builtin.copy:
+        src: /etc/kubernetes/admin.conf
+        dest: "/home/{{ ansible_user }}/.kube/config"
+        remote_src: true
+        owner: "{{ ansible_user }}"
+        mode: "0600"</code></pre>
+
+<p>Gives the <code>debian</code> user their own working <code>kubectl</code> setup — a copy of
+the admin kubeconfig in <code>~/.kube/config</code>. <code>remote_src: true</code> means this is a
+local copy on cp1, not a file pushed from the control machine.
+<code>mode: "0600"</code> matters: that file holds full cluster-admin credentials, so it's
+readable by nobody but that user.</p>
+
+<pre><code>    - name: Attendi che tutti i nodi siano Ready
+      ansible.builtin.command: kubectl wait --for=condition=Ready nodes --all --timeout=600s
+      changed_when: false
+
+    - name: Attendi che tutti i pod siano Ready
+      ansible.builtin.command: kubectl wait --for=condition=Ready pod --all -A --timeout=600s
+      changed_when: false</code></pre>
+
+<p>Two separate waits on purpose: nodes going <code>Ready</code> only means kubelet is up and
+talking to the API server — if the CNI plugin is broken, pods (CoreDNS, calico's own
+controllers...) can still sit stuck in <code>ContainerCreating</code> forever while every node
+looks fine. The second <code>wait</code> is what actually catches that.</p>
+
+<p>Result of the whole playbook: 5 <code>Ready</code> nodes, 3 of them control plane, every pod
+<code>Running</code>. To start over from scratch on any node:
+<code>kubeadm reset -f; rm -rf /etc/cni/net.d /var/lib/etcd</code>.</p>
+
+<p><a href="bootstrap-k8s.yml">Download bootstrap-k8s.yml →</a> · <a href="#file-map">↑ file map</a></p>
+
+<h2>Replicated storage</h2>
+
+<h3 id="longhorn"><code>longhorn.yml</code></h3>
+
+<p><em>What it does: installs Longhorn, Kubernetes' replicated block storage, and waits for it to
+be fully up before handing control back.</em></p>
+
+<pre><code>- name: Prerequisiti Longhorn sui worker
+  hosts: workers
+  become: true
+  tags: [prereq]
+  tasks:
+    - name: Pacchetti iSCSI e NFS
+      ansible.builtin.apt:
+        name: [open-iscsi, nfs-common]
+        state: present
+        update_cache: true
+
+    - name: Modulo kernel iscsi_tcp al boot
+      ansible.builtin.copy:
+        dest: /etc/modules-load.d/longhorn.conf
+        content: "iscsi_tcp\n"
+
+    - name: Carica il modulo ora
+      ansible.builtin.command: modprobe iscsi_tcp
+      changed_when: false
+
+    - name: Abilita e avvia iscsid
+      ansible.builtin.systemd:
+        name: iscsid
+        enabled: true
+        state: started</code></pre>
+
+<p>Only <code>hosts: workers</code> — Longhorn exposes volumes to pods over iSCSI (and NFS for
+RWX), and pods only run on workers, so only workers need the packages, the kernel module loaded at
+boot, and <code>iscsid</code> running.</p>
+
+<pre><code>- name: Installa Longhorn
+  hosts: cp1
+  become: true
+  tags: [install]
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Scarica il manifest ufficiale
+      ansible.builtin.get_url:
+        url: "https://raw.githubusercontent.com/longhorn/longhorn/{{ longhorn_version }}/deploy/longhorn.yaml"
+        dest: /root/longhorn.yaml
+        mode: "0644"
+
+    - name: Numero repliche della StorageClass
+      ansible.builtin.replace:
+        path: /root/longhorn.yaml
+        regexp: 'numberOfReplicas: "\d+"'
+        replace: 'numberOfReplicas: "{{ longhorn_replicas }}"'
+
+    - name: Applica Longhorn
+      ansible.builtin.command: kubectl apply -f /root/longhorn.yaml
+      changed_when: false</code></pre>
+
+<p>Installation itself only runs on <code>cp1</code>, since it's just <code>kubectl</code> talking
+to the API server — the actual Longhorn manager pods start themselves on the workers (control
+planes carry a <code>NoSchedule</code> taint). The official manifest defaults to 3 replicas, but
+there are only 2 workers here, so that number is patched to <code>{{ longhorn_replicas }}</code>
+(2, from <code>group_vars/all.yml</code>) before applying — with fewer replicas than workers,
+volumes would sit <code>degraded</code> forever. Bump <code>longhorn_replicas</code> in
+<code>group_vars</code> once a third worker exists.</p>
+
+<pre><code>    - name: Attendi i manager Longhorn (uno per worker)
+      ansible.builtin.command: kubectl -n longhorn-system rollout status ds/longhorn-manager --timeout=600s
+      changed_when: false
+
+    - name: Attendi il driver CSI
+      ansible.builtin.command: kubectl -n longhorn-system rollout status deploy/longhorn-driver-deployer --timeout=600s
+      changed_when: false
+
+    - name: Attendi che tutti i pod Longhorn siano Ready
+      ansible.builtin.command: kubectl -n longhorn-system wait --for=condition=Ready pod --all --timeout=60s
+      register: lh_ready
+      until: lh_ready.rc == 0
+      retries: 10
+      delay: 10
+      changed_when: false
+
+    - name: Verifica StorageClass longhorn
+      ansible.builtin.command: kubectl get storageclass longhorn
+      changed_when: false</code></pre>
+
+<p>Three separate waits, each for a different piece: the manager DaemonSet (one pod per worker),
+then the CSI driver deployer, then — with retries, since the CSI driver spawns further pods after
+it's up — every remaining pod in the namespace. Only once all of that is <code>Ready</code> does
+the last task confirm the <code>longhorn</code> StorageClass actually exists and is usable.</p>
+
+<p><a href="longhorn.yml">Download longhorn.yml →</a> · <a href="#file-map">↑ file map</a></p>
+
+<h2>One IP for the service, and a resilience test</h2>
+
+<h3 id="test-web"><code>test-web.yml</code></h3>
+
+<p><em>What it does: installs MetalLB, gives it an IP pool, then deploys a real nginx + Longhorn
+test workload behind a single LoadBalancer IP to prove the whole stack works together.</em></p>
+
+<pre><code>- name: MetalLB
+  hosts: cp1
+  become: true
+  tags: [metallb]
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Scarica il manifest ufficiale
+      ansible.builtin.get_url:
+        url: "https://raw.githubusercontent.com/metallb/metallb/{{ metallb_version }}/config/manifests/metallb-native.yaml"
+        dest: /root/metallb-native.yaml
+        mode: "0644"
+
+    - name: Applica MetalLB
+      ansible.builtin.command: kubectl apply -f /root/metallb-native.yaml
+      changed_when: false
+
+    - name: Attendi il controller
+      ansible.builtin.command: kubectl -n metallb-system rollout status deploy/controller --timeout=300s
+      changed_when: false
+
+    - name: Attendi gli speaker (uno per nodo)
+      ansible.builtin.command: kubectl -n metallb-system rollout status ds/speaker --timeout=300s
+      changed_when: false</code></pre>
+
+<p>A NodePort would expose a service on every node's own IP — not one address. MetalLB fixes that:
+the <code>controller</code> deployment assigns IPs to <code>LoadBalancer</code> Services from a
+pool, and the <code>speaker</code> DaemonSet (one pod per node) is what actually announces an
+assigned IP on the LAN.</p>
+
+<pre><code>    - name: Pool di IP e annuncio L2
+      ansible.builtin.copy:
+        dest: /root/metallb-pool.yaml
+        content: |
+          apiVersion: metallb.io/v1beta1
+          kind: IPAddressPool
+          metadata:
+            name: pool
+            namespace: metallb-system
+          spec:
+            addresses:
+              - {{ metallb_pool }}
+          ---
+          apiVersion: metallb.io/v1beta1
+          kind: L2Advertisement
+          metadata:
+            name: l2
+            namespace: metallb-system
+          spec:
+            ipAddressPools: [pool]
+
+    - name: Applica il pool (riprova finche' il webhook di MetalLB e' pronto)
+      ansible.builtin.command: kubectl apply -f /root/metallb-pool.yaml
+      register: pool_apply
+      until: pool_apply.rc == 0
+      retries: 10
+      delay: 6
+      changed_when: false</code></pre>
+
+<p><code>IPAddressPool</code> is the range MetalLB is allowed to hand out
+(<code>{{ metallb_pool }}</code>, <code>192.168.88.40-49</code>); <code>L2Advertisement</code> is
+what tells it to announce those IPs over plain ARP — mode L2, meaning one node holds and announces
+a given IP at a time, and another takes over if it disappears, the same idea as keepalived one
+layer up. Applying the pool right after installing MetalLB can race the admission webhook still
+starting up, hence the retry loop.</p>
+
+<pre><code>- name: Test - server web nginx con volume Longhorn
+  hosts: cp1
+  become: true
+  tags: [deploy]
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  tasks:
+    - name: Scrivi il manifest
+      ansible.builtin.copy:
+        dest: /root/test-web.yaml
+        content: |
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: test-web
+          ---
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: web-data
+            namespace: test-web
+          spec:
+            accessModes: [ReadWriteOnce]
+            storageClassName: longhorn
+            resources:
+              requests:
+                storage: 1Gi</code></pre>
+
+<p>A dedicated namespace, and a 1 GiB PVC against the <code>longhorn</code> StorageClass — this is
+what actually exercises the storage layer, not just the network one.</p>
+
+<pre><code>          ---
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: web
+            namespace: test-web
+          spec:
+            replicas: 1
+            strategy:
+              type: Recreate
+            selector:
+              matchLabels: {app: web}
+            template:
+              metadata:
+                labels: {app: web}
+              spec:
+                initContainers:
+                  - name: init-page
+                    image: busybox:1.37
+                    command:
+                      - sh
+                      - -c
+                      - '[ -f /data/index.html ] || echo "&lt;h1&gt;Longhorn OK&lt;/h1&gt;&lt;p&gt;pagina creata il $(date) dal pod $(hostname)&lt;/p&gt;" > /data/index.html'
+                    volumeMounts:
+                      - {name: data, mountPath: /data}
+                containers:
+                  - name: nginx
+                    image: nginx:stable-alpine
+                    ports:
+                      - containerPort: 80
+                    volumeMounts:
+                      - {name: data, mountPath: /usr/share/nginx/html}
+                volumes:
+                  - name: data
+                    persistentVolumeClaim:
+                      claimName: web-data</code></pre>
+
+<p><code>strategy: Recreate</code> because the PVC is RWO (one writer at a time): with the default
+rolling update, Kubernetes would try to start the new pod before the old one lets go of the
+volume, and it would just hang. The <code>initContainer</code> writes <code>index.html</code> with
+a timestamp and the pod's hostname, but only if that file doesn't already exist — which is exactly
+the point: if the page survives a pod moving to a different node, its creation time won't change,
+proving the data itself moved with it rather than being recreated from scratch.</p>
+
+<pre><code>          ---
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: web
+            namespace: test-web
+            annotations:
+              metallb.io/loadBalancerIPs: "{{ web_ip }}"
+          spec:
+            type: LoadBalancer
+            selector: {app: web}
+            ports:
+              - port: 80
+                targetPort: 80</code></pre>
+
+<p>A <code>LoadBalancer</code> Service pinned to a fixed address (<code>{{ web_ip }}</code>,
+<code>192.168.88.40</code>) via the MetalLB-specific annotation — without it, MetalLB would just
+hand out the next free IP from the pool instead of always the same one.</p>
+
+<pre><code>    - name: Attendi che la PVC sia Bound
+      ansible.builtin.command:
+        argv: [kubectl, -n, test-web, wait, "--for=jsonpath={.status.phase}=Bound", pvc/web-data, --timeout=120s]
+      changed_when: false
+
+    - name: Attendi che il pod nginx sia pronto
+      ansible.builtin.command: kubectl -n test-web rollout status deploy/web --timeout=300s
+      changed_when: false
+
+    - name: Richiedi la pagina sull'IP unico
+      ansible.builtin.uri:
+        url: "http://{{ web_ip }}"
+        return_content: true
+      register: web_page
+      until: web_page.status == 200
+      retries: 10
+      delay: 5
+      changed_when: false</code></pre>
+
+<p>Three checks in sequence: the PVC actually gets a Longhorn volume and goes
+<code>Bound</code>, the Deployment's rollout finishes, and finally an HTTP request against
+<code>web_ip</code> itself — retried for almost a minute, since MetalLB announcing a fresh IP over
+ARP isn't instant. Getting a real 200 back here is the end-to-end proof: scheduling, pod
+networking, DNS, storage and the Service all worked together. A separate play, gated behind
+<code>--tags cleanup</code> (never run by default), tears the whole namespace back down.</p>
+
+<p><a href="test-web.yml">Download test-web.yml →</a> · <a href="#file-map">↑ file map</a></p>
+
+<h3>Resilience test</h3>
+
+<p>None of this proves anything survives a node dying until it's actually tested. With the test
+service up, draining the worker the pod is running on:</p>
+
+<pre><code>kubectl drain &lt;node&gt; --ignore-daemonsets --delete-emptydir-data
+kubectl uncordon &lt;node&gt;</code></pre>
+
+<p><code>drain</code> marks the node unschedulable and evicts every pod on it except DaemonSets,
+forcing the nginx pod to be rescheduled on the other worker — that's the actual failure being
+simulated. <code>uncordon</code> makes the node schedulable again once the test is done; it does
+not move anything back by itself.</p>
+
+<p>Results:</p>
+
+<ul>
+<li>The pod rescheduled onto the other worker (tested both directions, node5 → node4 and node4 →
+node5).</li>
+<li><code>192.168.88.40</code> kept answering throughout, including from outside the cluster.</li>
+<li>The page kept its original creation timestamp — the data survived the node change.</li>
+<li>The Longhorn volume went <code>degraded</code> during the drain (one replica offline) and
+returned to <code>healthy</code> on its own after <code>uncordon</code>.</li>
+</ul>
+
+</article>
+
+<footer>nicologiuliani.site</footer>
+</main>
+</body>
+</html>
