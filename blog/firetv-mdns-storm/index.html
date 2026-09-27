@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fire TV killing your Wi-Fi? The mDNS storm bug, and how to fix it — Nicolò Giuliani</title>
+<meta name="description" content="Wi-Fi dying on every device while a Fire TV is on the network, wired connections unaffected? This is a known, unfixed Fire OS bug — an mDNS query flood at ~300 packets/second. Two 2-minute fixes that don't need rooting, the root cause, and a permanent fix on the device itself.">
+<meta name="author" content="Nicolò Giuliani">
+<link rel="canonical" href="https://nicologiuliani.site/blog/firetv-mdns-storm/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Fire TV killing your Wi-Fi? The mDNS storm bug, and how to fix it">
+<meta property="og:description" content="Wi-Fi dying on every device while a Fire TV is on the network, wired connections unaffected? Known, unfixed Fire OS bug. Two 2-minute fixes, the root cause, and a permanent fix.">
+<meta property="og:url" content="https://nicologiuliani.site/blog/firetv-mdns-storm/">
+<meta property="og:image" content="https://nicologiuliani.site/assets/og.png">
+<meta property="article:published_time" content="2026-09-27">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nicologiuliani.site/assets/og.png">
+<meta name="twitter:title" content="Fire TV killing your Wi-Fi? The mDNS storm bug, and how to fix it">
+<meta name="twitter:description" content="Wi-Fi dying on every device while a Fire TV is on the network, wired connections unaffected? Known, unfixed Fire OS bug. Two 2-minute fixes, the root cause, and a permanent fix.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Fire TV killing your Wi-Fi? The mDNS storm bug, and how to fix it",
+  "datePublished": "2026-09-27",
+  "url": "https://nicologiuliani.site/blog/firetv-mdns-storm/",
+  "author": { "@type": "Person", "name": "Nicolò Giuliani", "url": "https://nicologiuliani.site/" }
+}
+</script>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<main>
+  <a class="back-link" href="/blog/">← Blog</a>
+
+  <header>
+    <h1>Fire TV killing your Wi-Fi? The mDNS storm bug, and how to fix it</h1>
+    <p class="post-meta"><time datetime="2026-09-27">27 September 2026</time></p>
+  </header>
+
+  <article class="post-body">
+
+    <p>
+      Every access point in the house went unusable at once — pages timing out, video stuck at
+      240p, 46–60% packet loss even pinging the gateway one hop away — while every wired client
+      stayed perfectly fine. The cause turned out to be a single Fire TV Stick, a router answering
+      one of its queries with an empty packet, and a Fire OS bug that has been open and unfixed
+      since July 2026: no backoff on that empty reply, so the device just keeps asking, forever, at
+      close to 300 packets a second.
+    </p>
+
+    <p>Confirm it in ten seconds from any Linux/Mac box on the same network — if this fills up almost instantly (normal mDNS traffic is a few packets a minute, not thousands in ten seconds), this is your problem:</p>
+
+    <pre><code>sudo tcpdump -i &lt;iface&gt; -nn -e -c 3000 port 5353</code></pre>
+
+    <h2>Fastest fix — no rooting, about two minutes</h2>
+
+    <p>The Fire TV is only reacting to a bad answer from somewhere else on the network. Fix that, and the flood stops on its own:</p>
+
+    <ol>
+      <li>
+        <strong>Turn off (or remove from mDNS duty) whatever device is answering with the empty
+        packet.</strong> In our case that was a FRITZ!Box used only as a Wi-Fi repeater, easily
+        replaced. This alone dropped the flood from ~300 pps to ~1 pps. The Fire TV doesn't save
+        the hostname anywhere — it only ever learns it live from that device's own mDNS
+        announcements, so no announcements means nothing to chase.
+      </li>
+      <li>
+        <strong>Can't remove that device?</strong> Run a small always-on responder that answers the
+        Fire TV's query properly instead, with a standard negative reply ("this name has no
+        AAAA record") followed by the correct A record. The Fire TV caches that and stops asking.
+        Verified: 12 responses silenced 881 queries. It needs to keep running continuously — the
+        negative-cache TTL is 120 seconds, so a one-off reply isn't enough — on any always-on Linux
+        box on the LAN (a Raspberry Pi, a router running OpenWrt, anything). Python 3, standard
+        library only, no dependencies:
+      </li>
+    </ol>
+
+    <pre><code>#!/usr/bin/env python3
+"""Answers a Fire TV's repeated mDNS AAAA query for a name with a proper
+negative response (NSEC), instead of leaving it to an empty/bad reply that
+Fire OS never backs off from.
+
+Usage:  mdns-nsec-responder.py &lt;your-interface-ip&gt; &lt;name-being-queried&gt; &lt;that-name's-ip&gt;
+Example: mdns-nsec-responder.py 192.168.1.5 192-168-1-1.fritz.box 192.168.1.1
+
+Find &lt;name-being-queried&gt; by watching tcpdump output above for the AAAA
+query the Fire TV keeps repeating (it names the mDNS record it wants).
+"""
+import socket, struct, sys, time
+
+IFACE_IP = sys.argv[1]
+NAME = sys.argv[2].lower().rstrip(".")
+NAME_IP = sys.argv[3]
+
+TYPE_A, TYPE_AAAA, TYPE_NSEC = 1, 28, 47
+CLASS_FLUSH_IN = 0x8001
+MIN_INTERVAL = 0.25   # don't become the storm ourselves
+TTL = 120
+
+
+def encode_name(name):
+    out = b""
+    for label in name.split("."):
+        out += bytes([len(label)]) + label.encode()
+    return out + b"\x00"
+
+
+def decode_name(data, off):
+    parts = []
+    while True:
+        ln = data[off]
+        if ln == 0:
+            off += 1
+            break
+        if ln & 0xC0 == 0xC0:
+            ptr = struct.unpack("!H", data[off:off + 2])[0] & 0x3FFF
+            parts.append(decode_name(data, ptr)[0])
+            off += 2
+            break
+        parts.append(data[off + 1:off + 1 + ln].decode("utf-8", "replace"))
+        off += 1 + ln
+    return ".".join(parts), off
+
+
+def rr(name, rtype, rdata):
+    return encode_name(name) + struct.pack("!HHIH", rtype, CLASS_FLUSH_IN, TTL, len(rdata)) + rdata
+
+
+def build_response(name, ip):
+    # NSEC bitmap: window 0, 1 byte, only the A-type bit set
+    # -> this name has an A record but no AAAA
+    answer = rr(name, TYPE_NSEC, encode_name(name) + bytes([0, 1, 0x40]))
+    additional = rr(name, TYPE_A, socket.inet_aton(ip))
+    return struct.pack("!HHHHHH", 0, 0x8400, 0, 1, 0, 1) + answer + additional
+
+
+def main():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(("", 5353))
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 255)
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(IFACE_IP))
+    s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP,
+                 socket.inet_aton("224.0.0.251") + socket.inet_aton(IFACE_IP))
+    s.settimeout(1.0)
+
+    response = build_response(NAME, NAME_IP)
+    last_sent = 0.0
+    while True:
+        try:
+            data, _ = s.recvfrom(9000)
+        except socket.timeout:
+            continue
+        except OSError:
+            time.sleep(1)
+            continue
+        try:
+            if struct.unpack("!H", data[4:6])[0] == 0:   # no questions: it's a reply, ignore
+                continue
+            qname, off = decode_name(data, 12)
+            qtype = struct.unpack("!H", data[off:off + 2])[0]
+        except Exception:
+            continue
+        if qtype != TYPE_AAAA or qname.lower().rstrip(".") != NAME:
+            continue
+        now = time.time()
+        if now - last_sent &lt; MIN_INTERVAL:
+            continue
+        last_sent = now
+        try:
+            s.sendto(response, ("224.0.0.251", 5353))
+        except OSError:
+            pass
+
+
+if __name__ == "__main__":
+    main()</code></pre>
+
+    <p>Run it in the foreground first to confirm it's working, then keep it running (a simple systemd unit is enough on most Linux boxes):</p>
+
+    <pre><code>sudo python3 mdns-nsec-responder.py &lt;your-lan-ip&gt; &lt;name-from-tcpdump&gt; &lt;that-name-ip&gt;</code></pre>
+
+    <pre><code># /etc/systemd/system/mdns-nsec-responder.service
+[Unit]
+Description=mDNS NSEC responder for the Fire TV storm bug
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/mdns-nsec-responder.py &lt;your-lan-ip&gt; &lt;name&gt; &lt;name-ip&gt;
+Restart=always
+
+[Install]
+WantedBy=multi-user.target</code></pre>
+
+    <p>
+      On OpenWrt, wrap it as a <code>procd</code> service instead — same script, started with
+      <code>procd_set_param respawn</code> so it survives crashes and reboots.
+    </p>
+
+    <p>Neither of these two fixes touches the Fire TV itself. That's covered next, for anyone who wants the flood gone permanently rather than routed around.</p>
+
+    <p class="post-meta">
+      Device tested against: Fire TV Stick 4K Max, 1st gen (<code>kara</code> / AFTKA), Fire OS
+      7.7.1.3, build <code>PS7713.5443</code>. The mDNS bug itself is in Fire OS, not this specific
+      model — the quick fixes above apply to any Fire TV/Fire TV Stick hitting this.
+    </p>
+
+    <h2>Why this happens</h2>
+
+    <p>
+      The Fire TV Stick was repeatedly querying the AAAA record for a <code>*.fritz.box</code>
+      hostname — the self-assigned name a FRITZ!Box router announces over mDNS. The FRITZ!Box was
+      answering with <strong>empty</strong> mDNS packets:
+    </p>
+
+    <pre><code>192.168.1.1.5353 &gt; 224.0.0.251.5353: 0* [0q] 0/0/0 (12)</code></pre>
+
+    <p>
+      Zero questions, zero records — not a valid answer, and not silence either. Fire OS doesn't
+      treat that as a real response and applies <strong>no backoff</strong>: it retransmits at
+      roughly 180 queries/second. Multicast frames are sent at the lowest common wireless rate to
+      every client on the segment, so ~300 pps of multicast is enough to saturate 2.4GHz airtime
+      for the whole network, while wired gigabit clients never notice.
+    </p>
+
+    <p>
+      This is a
+      <a href="https://community.amazondeveloper.com/t/possible-fire-os-networking-issue-repeated-mdns-aaaa-queries-2-600-mdns-packets-sec-can-overload-entire-local-networks/28820">known, Amazon-acknowledged Fire OS bug</a>,
+      reported July 28, 2026, still unfixed as of this write-up.
+    </p>
+
+    <blockquote>
+      <p>
+        <strong>A prediction that turned out wrong:</strong> Amazon's own report says the flood
+        starts "when no response is available," which we initially read as meaning removing the
+        FRITZ!Box would make things worse. It didn't — that line describes the loop
+        <em>after</em> it starts, not how it's triggered. Without the FRITZ!Box announcing that
+        hostname at all, the Fire TV never has anything to chase in the first place. Measuring
+        beats guessing.
+      </p>
+    </blockquote>
+
+    <h2>What we tried that didn't work</h2>
+
+    <table>
+      <thead><tr><th>Attempt</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>Uninstalling apps from the Fire TV</td><td>No effect — it's a system component</td></tr>
+        <tr><td><code>am force-stop</code> / <code>pm clear</code> on <code>com.amazon.whisperlink.core.android</code></td><td>Refused — protected package</td></tr>
+        <tr><td>Disabling IPv6 on the FRITZ!Box</td><td>Responses went from useless <code>fe80::</code> to empty — same 300 pps</td></tr>
+        <tr><td>Rebooting the FRITZ!Box</td><td>Storm resumed immediately</td></tr>
+        <tr><td>Publishing the name via avahi</td><td>avahi doesn't answer for names outside <code>.local</code></td></tr>
+        <tr><td>Filtering at the router</td><td>Traffic never crosses it — stays link-local between the Fire TV and the FRITZ!Box</td></tr>
+        <tr><td>NSEC responder without an A record</td><td>Not enough on its own — the trailing A record is required</td></tr>
+      </tbody>
+    </table>
+
+    <h2>The two quick fixes, measured</h2>
+
+    <table>
+      <thead><tr><th></th><th>mDNS rate</th><th>Wi-Fi packet loss</th></tr></thead>
+      <tbody>
+        <tr><td>Baseline (storm active)</td><td>~300 pps</td><td>46–60%</td></tr>
+        <tr><td>Offending device powered off</td><td>~1 pps</td><td>0%</td></tr>
+        <tr><td>NSEC responder running continuously</td><td>~0.1 pps</td><td>0%</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Permanent fix — remove it from the Fire TV itself (advanced, requires temporary root)</h2>
+
+    <p>
+      Both mitigations above treat the symptom. The actual source is on the Fire TV: a component
+      of Amazon's WhisperLink/WhisperPlay stack does the querying, and it's a protected system
+      package — normal ADB can't touch it.
+    </p>
+
+    <h3>Device identification matters</h3>
+
+    <blockquote>
+      <p>
+        There are two different "Fire TV Stick 4K Max" devices with very similar names:
+        <code>karat</code> (2nd gen, 2023, Fire OS 8.x) and <code>kara</code> (1st gen, 2021,
+        Fire OS 7.x, MediaTek SoC). Public root tooling for one does not apply to the other —
+        confirm the exact codename and build number with <code>getprop</code> before assuming a
+        guide applies.
+      </p>
+    </blockquote>
+
+    <h3>Temporary root, then targeted removal</h3>
+
+    <p>
+      We used <a href="https://github.com/Delitants/firetv-kara-standalone">a public,
+      build-specific fork</a> of the GhostLock kernel exploit (CVE-2026-43499), pinned to our
+      exact firmware (<code>PS7713.5443</code> / build <code>0035334210436</code>), to obtain
+      temporary root — it disappears on the next reboot, no bootloader unlock, no partition
+      writes. That temporary root was then used, directly, to remove just the three packages
+      responsible:
+    </p>
+
+    <pre><code>pm uninstall -k --user 0 com.amazon.whisperlink.core.android
+pm uninstall -k --user 0 com.amazon.whisperplay.service.install
+pm uninstall -k --user 0 com.amazon.whisperjoin.middleware.np</code></pre>
+
+    <p>
+      <code>com.amazon.whisperplay.contracts</code> was left in place deliberately, for
+      compatibility. Package removal is Android package-manager state, not a root artifact — it
+      survives reboots even though the root session that performed it doesn't.
+    </p>
+
+    <h3>What tripped us up along the way</h3>
+
+    <ul>
+      <li>
+        The kernel race exploit fails more often than it succeeds — that's expected, and the
+        tooling deliberately does not auto-retry, since a device-wide exploit log can't be safely
+        attributed to one invocation among several.
+      </li>
+      <li>
+        The bundled step that switches the Home launcher to a third-party one failed its own
+        read-back check twice in a row (a likely timing bug in that verification), triggering a
+        clean automatic rollback both times — no side effects, but no forward progress either.
+      </li>
+      <li>
+        <strong>What actually worked:</strong> we didn't need the launcher swap at all. With root
+        already obtained and the daemon still alive on the device, we ran the three
+        <code>pm uninstall</code> commands directly against it (wrapped in
+        <code>runcon u:r:shell:s0</code>, since the raw root context can't reach the Android
+        package-manager service on its own), skipping the launcher step entirely.
+      </li>
+      <li>
+        After a partially-successful attempt, SELinux was left in <code>Permissive</code> mode.
+        The tooling refuses to start the exploit again until it reads back
+        <code>Enforcing</code> — a clean reboot resets it.
+      </li>
+    </ul>
+
+    <h2>Verifying the fix</h2>
+
+    <pre><code>sudo tcpdump -i &lt;iface&gt; -nn -c 3000 port 5353</code></pre>
+
+    <table>
+      <thead><tr><th></th><th>mDNS traffic (15s window)</th></tr></thead>
+      <tbody>
+        <tr><td>Before</td><td>~4,500 packets, dominated by the Fire TV</td></tr>
+        <tr><td>After</td><td>3 packets total, none from the Fire TV</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      Neither the FRITZ!Box nor the NSEC responder are needed anymore. The query simply never gets
+      generated in the first place.
+    </p>
+
+    <h2>Known caveat, not yet tested</h2>
+
+    <p>
+      Removing the WhisperLink stack may break device discovery for phone-to-TV
+      casting/screen-mirroring, and Alexa multi-room audio routing to this specific Stick. We kept
+      <code>whisperplay.contracts</code> in place for baseline compatibility, but haven't yet
+      exercised those specific features against the change.
+    </p>
+
+    <h2>For Amazon</h2>
+
+    <p>
+      This isn't a proper upstream fix — it's package removal on a temporarily-rooted device, not
+      a patch to the closed-source WhisperLink binary, and it needs redoing after a factory reset.
+      We don't have the WhisperLink source, so we can't send an actual diff. What we can send is
+      the exact behavior that's wrong and the minimal fix for it:
+    </p>
+
+    <pre><code>on mDNS response received:
+    if response.questions == 0 and response.answers == 0:
+        # this is an empty reply, not "no reply" —
+        # today's code treats it as neither and just retries
+        treat_as(NXDOMAIN)
+        apply_negative_cache(ttl=120s)
+        stop_retransmitting()
+    else:
+        normal_backoff_logic()</code></pre>
+
+    <p>
+      The bug is specifically that an empty (zero questions, zero answers) mDNS packet doesn't get
+      classified as a negative response, so the retry loop never triggers its own backoff. Backing
+      off on empty replies the same way it already must for NSEC replies should be a small,
+      self-contained change. We're linking this write-up from the existing Amazon Developer forum
+      report in the hope it helps someone triage it.
+    </p>
+
+    <h2>How this was built, honestly</h2>
+
+    <p>
+      As with the other write-ups on this site, a significant part of the investigation notes and
+      this text were put together with LLM assistance (Claude, through Claude Code). The packet
+      captures, the physical access to the router and the Fire TV, and the decisions about what to
+      actually run on the device were mine, under my authorisation for every root/write action
+      taken against the hardware.
+    </p>
+
+    <hr>
+
+    <p>
+      <strong>References</strong><br>
+      <a href="https://community.amazondeveloper.com/t/possible-fire-os-networking-issue-repeated-mdns-aaaa-queries-2-600-mdns-packets-sec-can-overload-entire-local-networks/28820">Amazon Developer forum report (2026-07-28)</a><br>
+      <a href="https://github.com/Delitants/firetv-kara-standalone">Delitants/firetv-kara-standalone — kara-specific root tooling</a><br>
+      <a href="https://github.com/R0rt1z2/GhostLock">R0rt1z2/GhostLock — CVE-2026-43499 kernel exploit (karat/sunstone)</a>
+    </p>
+
+  </article>
+
+  <footer>nicologiuliani.site · <a href="https://github.com/sponsors/nicologiuliani6">Sponsor</a></footer>
+</main>
+</body>
+</html>
