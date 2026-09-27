@@ -77,12 +77,33 @@
         <li>Ran infrastructure-level security benchmarks (CIS) on the digital twin and tested lifecycle and backup-recovery procedures</li>
       </ul>
     </div>
+
+    <div class="entry">
+      <div class="entry-head">
+        <h3>Linux Kernel — netdev</h3>
+        <span class="where">Contributor</span>
+      </div>
+      <ul>
+        <li>Fixed a probe failure in the <code>mv88e6xxx</code> DSA driver (two Marvell switch
+        models wrongly assumed to have PTP hardware) — reviewed by Andrew Lunn, merged into
+        <code>net.git</code> by netdev maintainer Jakub Kicinski — <a href="/blog/mv88e6xxx-ptp-netdev/">write-up →</a></li>
+        <li>Device-tree bindings and board support for the same hardware under review on
+        <code>mvebu/dt</code> (<code>Acked-by</code> Krzysztof Kozlowski)</li>
+      </ul>
+    </div>
   </section>
 
   <section id="writing">
     <h2>Writing</h2>
 
     <ul class="post-list">
+
+      <li>
+        <h3><a href="/blog/mv88e6xxx-ptp-netdev/">Getting a fix into net.git: mv88e6xxx and the missing PTP</a></h3>
+        <p class="post-meta"><time datetime="2026-09-27">27 September 2026</time></p>
+        <p class="summary">A switch that wouldn't probe, traced to a driver assuming PTP hardware two Marvell switch models don't have — and the review process that turned it into a merged net.git commit.</p>
+        <a class="repo-link" href="/blog/mv88e6xxx-ptp-netdev/">→ read</a>
+      </li>
 
       <li>
         <h3><a href="/blog/sophos-xgs107w-openwrt/">Two computers, one firewall: OpenWrt on the Sophos XGS 107w</a></h3>

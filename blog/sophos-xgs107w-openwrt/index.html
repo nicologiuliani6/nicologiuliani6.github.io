@@ -229,10 +229,12 @@
       than I do gets a chance to catch anything wrong. Two things went out: a device-tree series
       describing the CN9130 XGS 107w board, and a fix to the <code>mv88e6xxx</code> switch driver
       (the 88E6191X/88E6193X don't have PTP, and the driver was assuming they did). The switch fix
-      is reviewed and accepted by the DSA maintainer; the device tree is still waiting on a
-      maintainer's ack. Using the board today needs neither — the same changes already ship inside
-      this project's own image — but if they land, the next person who finds one of these on a
-      shelf starts from mainline instead of from a private patch set.
+      is merged into <code>net.git</code> — <a href="/blog/mv88e6xxx-ptp-netdev/">write-up</a>,
+      <a href="https://git.kernel.org/pub/scm/linux/kernel/git/netdev/net.git/commit/?id=6b491af01aa5c0633a580e3b11bc7277adc903b2">commit</a>
+      — the device tree is still waiting on a maintainer's ack. Using the board today needed
+      neither — the same changes already shipped inside this project's own image before either one
+      went out — but now the next person who finds one of these on a shelf starts from mainline
+      instead of from a private patch set.
     </p>
 
     <h2>What's left</h2>

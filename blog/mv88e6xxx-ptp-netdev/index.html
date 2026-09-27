@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Getting a fix into net.git: mv88e6xxx and the missing PTP — Nicolò Giuliani</title>
+<meta name="description" content="A switch that wouldn't probe, traced to a driver assuming PTP hardware that two Marvell 88E6xxx parts don't have — and the review process (Andrew Lunn, Jakub Kicinski) that turned it into a merged net.git commit.">
+<meta name="author" content="Nicolò Giuliani">
+<link rel="canonical" href="https://nicologiuliani.site/blog/mv88e6xxx-ptp-netdev/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Getting a fix into net.git: mv88e6xxx and the missing PTP">
+<meta property="og:description" content="A switch that wouldn't probe, traced to a driver assuming PTP hardware that two Marvell 88E6xxx parts don't have — and the review process that turned it into a merged net.git commit.">
+<meta property="og:url" content="https://nicologiuliani.site/blog/mv88e6xxx-ptp-netdev/">
+<meta property="og:image" content="https://nicologiuliani.site/assets/og.png">
+<meta property="article:published_time" content="2026-09-27">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nicologiuliani.site/assets/og.png">
+<meta name="twitter:title" content="Getting a fix into net.git: mv88e6xxx and the missing PTP">
+<meta name="twitter:description" content="A switch that wouldn't probe, traced to a driver assuming PTP hardware that two Marvell 88E6xxx parts don't have — and the review process that turned it into a merged net.git commit.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "Getting a fix into net.git: mv88e6xxx and the missing PTP",
+  "datePublished": "2026-09-27",
+  "url": "https://nicologiuliani.site/blog/mv88e6xxx-ptp-netdev/",
+  "author": { "@type": "Person", "name": "Nicolò Giuliani", "url": "https://nicologiuliani.site/" }
+}
+</script>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<main>
+<a class="back-link" href="/blog/">← Blog</a>
+
+<header>
+<h1>Getting a fix into net.git: mv88e6xxx and the missing PTP</h1>
+<p class="post-meta"><time datetime="2026-09-27">27 September 2026</time></p>
+</header>
+
+<article class="post-body">
+
+<p>Side effect of <a href="/docs/sophos-xgs107w/">putting OpenWrt on a Sophos XGS 107w</a>: its
+Marvell 88E6193X switch wouldn't probe under a recent kernel. Chasing that down turned into a
+<code>net: dsa: mv88e6xxx</code> fix, reviewed by Marvell switch driver maintainer Andrew Lunn and
+merged into <code>net.git</code> by netdev maintainer Jakub Kicinski.</p>
+
+<h2>The failure</h2>
+
+<p>Booting a mainline kernel against the XGS 107w's switch produced:</p>
+
+<pre><code>mv88e6xxx ...: unexpected cycle counter period of 0 ps</code></pre>
+
+<p>and the switch never probed — no ports, nothing. The 88E6193X is a 6393-family part, and the
+driver's <code>mv88e6xxx_table</code> entry for it points at <code>mv88e6393x_ops</code> with
+<code>ptp_support = true</code>. Since <code>7e3c18097a70</code> ("net: dsa: mv88e6xxx: read cycle
+counter period from hardware"), PTP setup reads that period straight from the TAI (Time
+Application Interface) hardware registers — and on this chip, that register reads back zero.</p>
+
+<h2>Root cause</h2>
+
+<p>The 88E6191X and 88E6193X share <code>mv88e6393x_ops</code> with the 88E6393X, which does have
+PTP and AVB. But Marvell's own UMSD reference driver describes the 88E6193X's package as "No AVB,
+No Routing, No Cut-through" — and reading the actual hardware on the reference unit confirmed it
+directly: the whole indirect AVB register space behind Global 2 registers 0x16/0x17 read zero for
+every port, block and address, tried with both the 6390 and 6352 command encodings. Writes to the
+TAI registers — including the clock period register the new probe code reads — read back as zero
+too. The chip has no AVB or PTP block at all; the driver was just assuming it did because it shares
+an <code>ops</code> struct with a sibling that does.</p>
+
+<h2>From workaround to real fix</h2>
+
+<p>The first attempt was a narrower workaround — just enough to stop the probe from reading a
+period of zero. Andrew Lunn, one of the <code>mv88e6xxx</code> maintainers, suggested the actual
+fix instead: give the 88E6191X and 88E6193X their own <code>ops</code> struct. <code>Suggested-by</code>
+on the final patch is his.</p>
+
+<p><code>mv88e6191x_ops</code> is a copy of <code>mv88e6393x_ops</code> with <code>avb_ops</code>
+and <code>ptp_ops</code> left out, and <code>ptp_support</code> dropped from both table entries:</p>
+
+<pre><code>-		.ptp_support = true,
+-		.ops = &mv88e6393x_ops,
++		.ops = &mv88e6191x_ops,</code></pre>
+
+<p>(applied to both the <code>MV88E6191X</code> and <code>MV88E6193X</code> entries in
+<code>mv88e6xxx_table</code>). The 88E6393X itself is untouched — it keeps
+<code>mv88e6393x_ops</code> and real PTP support. Tested on the reference 88E6193X: the switch
+probes and every port works. There's no 88E6191X on hand to test directly, but UMSD describes it
+the same way as the 88E6193X, so it gets the same treatment.</p>
+
+<h2>Review and merge</h2>
+
+<p>Sent to netdev as <code>[PATCH net v2]</code>, tagged <code>Fixes: de776d0d316f</code> since
+that's the commit that turned a latent assumption into an actual probe failure. Andrew Lunn
+reviewed it (<code>Reviewed-by</code>), and it was picked up by <strong>Jakub Kicinski</strong> —
+the netdev subsystem maintainer — into <code>net.git</code>:</p>
+
+<p><a href="https://git.kernel.org/pub/scm/linux/kernel/git/netdev/net.git/commit/?id=6b491af01aa5c0633a580e3b11bc7277adc903b2">net: dsa: mv88e6xxx: 88E6191X and 88E6193X have no PTP →</a></p>
+
+<h2>Still in review</h2>
+
+<p>The other half of the same project — a 3-patch series adding the Sophos vendor prefix and a
+device tree for the XGS 107w's Marvell CN9130 NPU board, sent to the <code>mvebu/dt</code> tree —
+is still under review. The vendor-prefix patch already has an <code>Acked-by</code> from Krzysztof
+Kozlowski; the board compatible string and the DTS itself are still waiting. All four patches, the
+cover letter and the checks run on them are in the project repo's
+<a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107/tree/main/upstream">upstream/</a>
+directory.</p>
+
+<p>Full project background: <a href="/docs/sophos-xgs107w/">the Sophos XGS 107w docs page</a> and
+<a href="/blog/sophos-xgs107w-openwrt/">the OpenWrt write-up</a>.</p>
+
+</article>
+
+<footer>nicologiuliani.site</footer>
+</main>
+</body>
+</html>
