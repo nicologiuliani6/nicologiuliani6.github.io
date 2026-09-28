@@ -97,13 +97,43 @@ the netdev subsystem maintainer — into <code>net.git</code>:</p>
 
 <p><a href="https://git.kernel.org/pub/scm/linux/kernel/git/netdev/net.git/commit/?id=6b491af01aa5c0633a580e3b11bc7277adc903b2">net: dsa: mv88e6xxx: 88E6191X and 88E6193X have no PTP →</a></p>
 
-<h2>Still in review</h2>
+<h2>Timeline</h2>
 
-<p>The other half of the same project — a 3-patch series adding the Sophos vendor prefix and a
+<p>Both series — the netdev fix above and a 3-patch series adding the Sophos vendor prefix and a
 device tree for the XGS 107w's Marvell CN9130 NPU board, sent to the <code>mvebu/dt</code> tree —
-is still under review. The vendor-prefix patch already has an <code>Acked-by</code> from Krzysztof
-Kozlowski; the board compatible string and the DTS itself are still waiting. All four patches, the
-cover letter and the checks run on them are in the project repo's
+went out together and were reviewed in parallel:</p>
+
+<table>
+<thead><tr><th>Date</th><th>Event</th></tr></thead>
+<tbody>
+<tr><td>2026-09-19</td><td>v1 sent: 3 device-tree patches (vendor prefix, binding, DTS) + the
+netdev patch</td></tr>
+<tr><td>2026-09-20</td><td>Andrew Lunn and Krzysztof Kozlowski review v1, request changes</td></tr>
+<tr><td>2026-09-21 02:26</td><td>v2 of the 3 device-tree patches sent</td></tr>
+<tr><td>2026-09-21 05:56</td><td>v2 of the netdev patch sent</td></tr>
+<tr><td>2026-09-21 14:18</td><td>Andrew Lunn gives <code>Reviewed-by</code> on the netdev patch
+v2</td></tr>
+<tr><td>2026-09-22 14:08</td><td>Andrew Lunn gives <code>Reviewed-by</code> on device-tree patch
+3/3 (the board DTS)</td></tr>
+<tr><td>2026-09-24</td><td>Netdev patch merged into <code>net.git</code> by Jakub Kicinski, commit
+<code>6b491af0</code></td></tr>
+<tr><td>2026-09-24</td><td>Krzysztof Kozlowski gives <code>Acked-by</code> on device-tree patch
+2/3 (the binding)</td></tr>
+<tr><td>2026-09-28</td><td>Netdev patch backported to the 7.2-stable tree by Sasha Levin
+(<code>queue-7.2</code>), commit <code>6a366176ce5f</code></td></tr>
+</tbody>
+</table>
+
+<p>Device-tree patch 1/3 (the <code>sophos</code> vendor prefix) already had Krzysztof Kozlowski's
+<code>Acked-by</code> from the v1 review on 2026-09-20, carried unchanged into v2.</p>
+
+<h2>Device tree: signed off, not applied yet</h2>
+
+<p>As of 2026-09-28, all three device-tree patches have every reviewer's sign-off they need — 1/3
+and 2/3 <code>Acked-by</code> Krzysztof Kozlowski, 3/3 <code>Reviewed-by</code> Andrew Lunn — but no
+Marvell/mvebu maintainer (Gregory Clement, Andrew Lunn or Sebastian Hesselbarth) has applied them to
+their tree yet. That's the one open item, no date yet. All four patches, the cover letter and the
+checks run on them are in the project repo's
 <a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107/tree/main/upstream">upstream/</a>
 directory.</p>
 
