@@ -1,4 +1,4 @@
-vip: "192.168.88.20"
+vip: "<VIP>"
 vip_port: 8443
 vrrp_pass: "CHANGE_ME"
 
@@ -9,5 +9,5 @@ longhorn_version: "v1.12.1"
 longhorn_replicas: 2
 
 metallb_version: "v0.16.1"
-metallb_pool: "192.168.88.40-192.168.88.49"
-web_ip: "192.168.88.40"
+metallb_pool: "<METALLB_POOL_START>-<METALLB_POOL_END>"
+web_ip: "<WEB_IP>"

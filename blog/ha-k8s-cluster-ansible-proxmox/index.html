@@ -59,8 +59,8 @@ RAM / 1 TB thin disk, hostname <code>nodeN</code>, fixed MAC → fixed IP via DH
 <table>
 <thead><tr><th>Nodes</th><th>Role</th><th>IP</th></tr></thead>
 <tbody>
-<tr><td>node1–3</td><td>control plane (cp1–3)</td><td>192.168.88.21–23</td></tr>
-<tr><td>node4–5</td><td>workers (w1–2)</td><td>192.168.88.24–25</td></tr>
+<tr><td>node1–3</td><td>control plane (cp1–3)</td><td>&lt;CP_IP_1&gt;–&lt;CP_IP_3&gt;</td></tr>
+<tr><td>node4–5</td><td>workers (w1–2)</td><td>&lt;WORKER_IP_1&gt;–&lt;WORKER_IP_2&gt;</td></tr>
 </tbody>
 </table>
 
@@ -379,7 +379,7 @@ file also carries a <code>vrrp_pass</code> value (the shared secret the three ke
 use to authenticate each other over VRRP) — redacted to a placeholder here and in the downloadable
 copy, since this repo is public.</p>
 
-<pre><code>vip: "192.168.88.20"
+<pre><code>vip: "&lt;VIP&gt;"
 vip_port: 8443
 vrrp_pass: "CHANGE_ME"
 
@@ -390,8 +390,8 @@ longhorn_version: "v1.12.1"
 longhorn_replicas: 2
 
 metallb_version: "v0.16.1"
-metallb_pool: "192.168.88.40-192.168.88.49"
-web_ip: "192.168.88.40"</code></pre>
+metallb_pool: "&lt;METALLB_POOL_START&gt;-&lt;METALLB_POOL_END&gt;"
+web_ip: "&lt;WEB_IP&gt;"</code></pre>
 
 <p><code>vip</code>/<code>vip_port</code> are the address <code>lb.yml</code> sets up next.
 <code>pod_cidr</code> and <code>calico_version</code> feed the CNI install in
@@ -865,7 +865,7 @@ assigned IP on the LAN.</p>
       changed_when: false</code></pre>
 
 <p><code>IPAddressPool</code> is the range MetalLB is allowed to hand out
-(<code>{{ metallb_pool }}</code>, <code>192.168.88.40-49</code>); <code>L2Advertisement</code> is
+(<code>{{ metallb_pool }}</code>, <code>&lt;METALLB_POOL_START&gt;-&lt;METALLB_POOL_END&gt;</code>); <code>L2Advertisement</code> is
 what tells it to announce those IPs over plain ARP — mode L2, meaning one node holds and announces
 a given IP at a time, and another takes over if it disappears, the same idea as keepalived one
 layer up. Applying the pool right after installing MetalLB can race the admission webhook still
@@ -962,7 +962,7 @@ proving the data itself moved with it rather than being recreated from scratch.<
                 targetPort: 80</code></pre>
 
 <p>A <code>LoadBalancer</code> Service pinned to a fixed address (<code>{{ web_ip }}</code>,
-<code>192.168.88.40</code>) via the MetalLB-specific annotation — without it, MetalLB would just
+<code>&lt;WEB_IP&gt;</code>) via the MetalLB-specific annotation — without it, MetalLB would just
 hand out the next free IP from the pool instead of always the same one.</p>
 
 <pre><code>    - name: Attendi che la PVC sia Bound
@@ -1011,7 +1011,7 @@ not move anything back by itself.</p>
 <ul>
 <li>The pod rescheduled onto the other worker (tested both directions, node5 → node4 and node4 →
 node5).</li>
-<li><code>192.168.88.40</code> kept answering throughout, including from outside the cluster.</li>
+<li><code>&lt;WEB_IP&gt;</code> kept answering throughout, including from outside the cluster.</li>
 <li>The page kept its original creation timestamp — the data survived the node change.</li>
 <li>The Longhorn volume went <code>degraded</code> during the drain (one replica offline) and
 returned to <code>healthy</code> on its own after <code>uncordon</code>.</li>
