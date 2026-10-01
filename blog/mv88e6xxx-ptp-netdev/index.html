@@ -121,19 +121,33 @@ v2</td></tr>
 2/3 (the binding)</td></tr>
 <tr><td>2026-09-28</td><td>Netdev patch backported to the 7.2-stable tree by Sasha Levin
 (<code>queue-7.2</code>), commit <code>6a366176ce5f</code></td></tr>
+<tr><td>2026-09-30 10:35</td><td>Follow-up sent on the cover-letter thread to Gregory Clement, Andrew
+Lunn and Sebastian Hesselbarth (the mvebu maintainers), asking whether anything else was needed
+before the device-tree series could be applied</td></tr>
+<tr><td>2026-09-30</td><td>Gregory Clement replies the same day: working through his backlog, will
+either apply it or report back if something's missing</td></tr>
+<tr><td>2026-10-01</td><td>Gregory Clement applies all three device-tree patches to
+<code>mvebu/dt64</code>, replying on the cover-letter thread with "Applied on mvebu/dt64"</td></tr>
 </tbody>
 </table>
 
 <p>Device-tree patch 1/3 (the <code>sophos</code> vendor prefix) already had Krzysztof Kozlowski's
 <code>Acked-by</code> from the v1 review on 2026-09-20, carried unchanged into v2.</p>
 
-<h2>Device tree: signed off, not applied yet</h2>
+<h2>Device tree: applied</h2>
 
-<p>As of 2026-09-28, all three device-tree patches have every reviewer's sign-off they need — 1/3
-and 2/3 <code>Acked-by</code> Krzysztof Kozlowski, 3/3 <code>Reviewed-by</code> Andrew Lunn — but no
-Marvell/mvebu maintainer (Gregory Clement, Andrew Lunn or Sebastian Hesselbarth) has applied them to
-their tree yet. That's the one open item, no date yet. All four patches, the cover letter and the
-checks run on them are in the project repo's
+<p>All three device-tree patches had every reviewer's sign-off since 2026-09-28 — 1/3 and 2/3
+<code>Acked-by</code> Krzysztof Kozlowski, 3/3 <code>Reviewed-by</code> Andrew Lunn — but sat unapplied
+while the mvebu maintainers worked through their backlog. A follow-up to the cover-letter thread on
+2026-09-30 asking Gregory Clement, Andrew Lunn and Sebastian Hesselbarth whether anything else was
+needed got a same-day reply from Gregory Clement, and on 2026-10-01 he applied all three patches to
+<code>mvebu/dt64</code>, replying "Applied on mvebu/dt64" on the thread. The series is accepted and
+will flow to mainline at the next merge window.</p>
+
+<p>All four patches are now accepted upstream: the netdev fix is merged into <code>net.git</code>
+and backported to the 7.2-stable tree, and the device-tree series is applied to
+<code>mvebu/dt64</code>. Nothing is still pending with upstream for this hardware-support work. All
+four patches, the cover letter and the checks run on them are in the project repo's
 <a href="https://github.com/nicologiuliani6/openwrt-sophos-xgs107/tree/main/upstream">upstream/</a>
 directory.</p>
 
