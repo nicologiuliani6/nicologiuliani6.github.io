@@ -20,9 +20,11 @@ main{max-width:860px}
 .subjects a{display:block; border:1px solid var(--line); border-radius:6px; padding:.7rem .85rem; color:var(--fg); height:100%}
 .subjects a:hover{border-color:var(--accent); text-decoration:none}
 .subjects .name{font-weight:600; font-size:.95rem; display:block}
-.subjects .it{color:var(--muted); font-size:.82rem}
+.subjects .it{color:var(--muted); font-size:.82rem; display:block; line-height:1.35}
 .subjects .count{color:var(--muted); font-size:.8rem; display:block; margin-top:.35rem}
 
+.years{display:flex; gap:1.2rem; margin:0 0 1rem; font-size:.95rem}
+.years .here{font-weight:600; border-bottom:2px solid var(--accent)}
 .crumbs{font-size:.9rem; margin:0 0 .8rem; word-break:break-word}
 .crumbs a{color:var(--accent)}
 .crumbs .sep{color:var(--muted); margin:0 .3rem}
@@ -67,7 +69,7 @@ main{max-width:860px}
     <h1>Course notes</h1>
     <p class="tagline">Notes, exercises and projects from my B.Sc. in Computer Science at the University of Bologna. Mostly in Italian, mostly LaTeX.</p>
     <nav>
-      <a href="/notes/">All subjects</a>
+      <a href="/notes/">Subjects</a>
       <a href="https://github.com/nicologiuliani6/appunti_uni">Repository on GitHub</a>
       <a href="https://nicologiuliani6.github.io/appunti_uni/atlante-uni.html">Interactive course map</a>
     </nav>
@@ -83,16 +85,29 @@ main{max-width:860px}
 <script>
 (() => {
   const OWNER = "nicologiuliani6", REPO = "appunti_uni", BRANCH = "main";
-  const SUBJECTS = [
-    { id: "algorithms",   name: "Data Structures and Algorithms",      it: "Algoritmi e strutture di dati",  path: "1/Algoritmi e strutture di dati" },
-    { id: "os",           name: "Operating Systems",                   it: "Sistemi operativi",              path: "2/so" },
-    { id: "networks",     name: "Computer Networks",                   it: "Reti di calcolatori",            path: "2/Reti" },
-    { id: "languages",    name: "Programming Languages",               it: "Linguaggi di programmazione",    path: "2/linguaggi" },
-    { id: "architecture", name: "Computer Architecture",               it: "Architettura degli elaboratori", path: "1/Architettura degli elaboratori" },
-    { id: "optimisation", name: "Combinatorial Optimisation",          it: "Ottimizzazione combinatoria",    path: "2/ottimizzazione" },
-    { id: "probability",  name: "Probability Calculus and Statistics", it: "Calcolo delle probabilità e statistica", path: "2/prob" },
-    { id: "logic",        name: "Logic for Computer Science",          it: "Logica per l'informatica",       path: "1/Logica per l'informatica" },
-  ];
+  const YEARS = ["1", "2", "3"], DEFAULT_YEAR = "3";
+  // English names for the course folders; anything new in the repo still shows up under its folder name
+  const NAMES = {
+    "1/Algebra e Geometria":            ["Linear Algebra and Geometry",         "Algebra e geometria"],
+    "1/Algoritmi e strutture di dati":  ["Data Structures and Algorithms",      "Algoritmi e strutture di dati"],
+    "1/Analisi matematica":             ["Calculus",                            "Analisi matematica"],
+    "1/Architettura degli elaboratori": ["Computer Architecture",               "Architettura degli elaboratori"],
+    "1/Logica per l'informatica":       ["Logic for Computer Science",          "Logica per l'informatica"],
+    "1/MODULI":                         ["Additional Modules",                  "Moduli (sicurezza)"],
+    "1/Programazione":                  ["Programming",                         "Programmazione"],
+    "2/Reti":                           ["Computer Networks",                   "Reti di calcolatori"],
+    "2/calcolo_num":                    ["Numerical Computing",                 "Calcolo numerico"],
+    "2/linguaggi":                      ["Programming Languages",               "Linguaggi di programmazione"],
+    "2/ottimizzazione":                 ["Combinatorial Optimisation",          "Ottimizzazione combinatoria"],
+    "2/prob":                           ["Probability Calculus and Statistics", "Calcolo delle probabilità e statistica"],
+    "2/so":                             ["Operating Systems",                   "Sistemi operativi"],
+    "2/web":                            ["Web Technologies",                    "Tecnologie web"],
+    "3/apprendimento":                  ["Introduction to Machine Learning",    "Introduzione all'apprendimento automatico"],
+    "3/basi_dati":                      ["Databases",                           "Basi di dati"],
+    "3/ing_sfw":                        ["Software Engineering",                "Ingegneria del software"],
+  };
+  const subjName = p => (NAMES[p] || [p.split("/")[1]])[0];
+  const subjIt   = p => (NAMES[p] || [, ""])[1];
 
   const enc = p => p.split("/").map(encodeURIComponent).join("/");
   const ghTree = p => `https://github.com/${OWNER}/${REPO}/tree/${BRANCH}/${enc(p)}`;
@@ -116,7 +131,7 @@ main{max-width:860px}
   /* ---------- tree loading: live GitHub API, cached; snapshot as fallback ---------- */
   let byDir = null, byName = null;
   async function loadTree() {
-    const KEY = "appunti-tree-v1", TTL = 3600e3;
+    const KEY = "appunti-tree-v2", TTL = 3600e3;
     let tree = null;
     try {
       const c = JSON.parse(localStorage.getItem(KEY) || "null");
@@ -196,49 +211,50 @@ main{max-width:860px}
     }
   }
 
-  /* ---------- routing: /notes/#<subject-id>/<path inside subject> ---------- */
+  /* ---------- routing: /notes/#<path in the repo>, e.g. #2/so/tex/so.tex; no hash = current year ---------- */
+  const link = p => "#" + p.split("/").map(encodeURIComponent).join("/");
   function route() {
-    const h = decodeURIComponent(location.hash.slice(1));
-    if (!h) return home();
-    const [id, ...rest] = h.split("/");
-    const s = SUBJECTS.find(x => x.id === id);
-    if (!s) return home();
-    const rel = rest.join("/");
-    const full = rel ? `${s.path}/${rel}` : s.path;
-    if (byDir.has(full)) return folder(s, rel, full);
-    const parent = byDir.get(full.slice(0, full.lastIndexOf("/"))) || [];
-    const f = parent.find(e => e.path === full);
-    if (f) return file(s, rel, f);
-    app.innerHTML = `<p class="msg">Not found. <a href="#${s.id}">Back to ${esc(s.name)}</a></p>`;
-  }
-  const link = (s, rel) => "#" + s.id + (rel ? "/" + rel.split("/").map(encodeURIComponent).join("/") : "");
-
-  function home() {
-    document.title = "Course notes · Nicolò Giuliani";
-    app.innerHTML = `<ul class="subjects">${SUBJECTS.map(s =>
-      `<li><a href="${link(s, "")}"><span class="name">${esc(s.name)}</span><span class="it">${esc(s.it)}</span><span class="count">${countFiles(s.path)} files</span></a></li>`).join("")}</ul>`;
+    const full = decodeURIComponent(location.hash.slice(1)).replace(/\/+$/, "") || DEFAULT_YEAR;
+    const parts = full.split("/");
+    if (!YEARS.includes(parts[0])) return year(DEFAULT_YEAR);
+    if (parts.length === 1) return year(parts[0]);
+    if (byDir.has(full)) return folder(full);
+    const f = (byDir.get(parts.slice(0, -1).join("/")) || []).find(e => e.path === full);
+    if (f) return file(f);
+    app.innerHTML = `<p class="msg">Not found. <a href="${link(parts[0])}">Back to year ${parts[0]}</a></p>`;
   }
 
-  function crumbs(s, rel) {
-    const parts = rel ? rel.split("/") : [];
-    let out = `<a href="#">Subjects</a><span class="sep">/</span>`;
-    out += parts.length ? `<a href="${link(s, "")}">${esc(s.name)}</a>` : `<span class="here">${esc(s.name)}</span>`;
-    parts.forEach((p, i) => {
-      out += `<span class="sep">/</span>`;
-      out += i === parts.length - 1 ? `<span class="here">${esc(p)}</span>` : `<a href="${link(s, parts.slice(0, i + 1).join("/"))}">${esc(p)}</a>`;
-    });
-    return `<p class="crumbs">${out}</p>`;
+  function tabs(cur) {
+    return `<p class="years">${YEARS.map(y => y === cur
+      ? `<span class="here">Year ${y}</span>` : `<a href="${link(y)}">Year ${y}</a>`).join("")}</p>`;
   }
 
-  function folder(s, rel, full) {
-    document.title = `${rel ? rel.split("/").pop() + " · " : ""}${s.name} · Course notes`;
+  function year(y) {
+    document.title = `Year ${y} · Course notes · Nicolò Giuliani`;
+    const subs = (byDir.get(y) || []).filter(e => e.type === "tree");
+    app.innerHTML = tabs(y) + (subs.length ? `<ul class="subjects">${subs.map(e =>
+      `<li><a href="${link(e.path)}"><span class="name">${esc(subjName(e.path))}</span><span class="it">${esc(subjIt(e.path))}</span><span class="count">${countFiles(e.path)} files</span></a></li>`).join("")}</ul>`
+      : `<p class="msg">Nothing here yet.</p>`);
+  }
+
+  function crumbs(full) {
+    const parts = full.split("/");
+    const label = i => i === 0 ? `Year ${parts[0]}` : i === 1 ? subjName(parts.slice(0, 2).join("/")) : parts[i];
+    return `<p class="crumbs">${parts.map((p, i) => i === parts.length - 1
+      ? `<span class="here">${esc(label(i))}</span>`
+      : `<a href="${link(parts.slice(0, i + 1).join("/"))}">${esc(label(i))}</a>`).join(`<span class="sep">/</span>`)}</p>`;
+  }
+
+  function folder(full) {
+    const parts = full.split("/");
+    document.title = `${parts.length > 2 ? parts[parts.length - 1] + " · " : ""}${subjName(parts.slice(0, 2).join("/"))} · Course notes`;
     const items = byDir.get(full) || [];
-    const up = rel ? `<li class="dir"><a href="${link(s, rel.split("/").slice(0, -1).join("/"))}"><span class="ico">↰</span><span class="nm">..</span></a></li>` : "";
+    const up = `<li class="dir"><a href="${link(parts.slice(0, -1).join("/"))}"><span class="ico">↰</span><span class="nm">..</span></a></li>`;
     const rows = items.map(e => {
-      const r = rel ? `${rel}/${e.name}` : e.name, dir = e.type === "tree";
-      return `<li class="${dir ? "dir" : "file"}"><a href="${link(s, r)}"><span class="ico" aria-hidden="true">${icon(e.name, dir)}</span><span class="nm">${esc(e.name)}</span><span class="sz">${dir ? "" : human(e.size)}</span></a></li>`;
+      const dir = e.type === "tree";
+      return `<li class="${dir ? "dir" : "file"}"><a href="${link(e.path)}"><span class="ico" aria-hidden="true">${icon(e.name, dir)}</span><span class="nm">${esc(e.name)}</span><span class="sz">${dir ? "" : human(e.size)}</span></a></li>`;
     }).join("");
-    app.innerHTML = crumbs(s, rel) +
+    app.innerHTML = crumbs(full) +
       `<div class="browser"><div class="bar"><span>${items.length} item${items.length === 1 ? "" : "s"}</span><a href="${ghTree(full)}">View on GitHub</a></div><ul class="listing">${up}${rows}</ul></div>`;
     const readme = items.find(e => e.type === "blob" && /^readme\.md$/i.test(e.name));
     if (readme) {
@@ -267,10 +283,10 @@ main{max-width:860px}
     } catch (e) { el.innerHTML = `Could not load this file. <a href="${ghBlob(path)}">Open it on GitHub</a>.`; }
   }
 
-  async function file(s, rel, f) {
+  async function file(f) {
     const name = f.name;
-    document.title = `${name} · ${s.name} · Course notes`;
-    app.innerHTML = crumbs(s, rel) +
+    document.title = `${name} · ${subjName(f.path.split("/").slice(0, 2).join("/"))} · Course notes`;
+    app.innerHTML = crumbs(f.path) +
       `<div class="browser"><div class="bar"><span>${human(f.size)}</span><span><a href="${ghBlob(f.path)}">View on GitHub</a> &nbsp; <a href="${raw(f.path)}" download="${esc(name)}">Download</a></span></div><div class="viewer" id="v"><p class="msg">Loading…</p></div></div>`;
     const v = document.getElementById("v");
     if (IMG.test(name)) {
