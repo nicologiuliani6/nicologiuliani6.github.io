@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Course notes · Nicolò Giuliani</title>
+<meta name="description" content="Browse Nicolò Giuliani's University of Bologna course notes, exercises and projects: algorithms, operating systems, networks, programming languages, computer architecture, optimisation, probability, logic.">
+<meta name="author" content="Nicolò Giuliani">
+<link rel="canonical" href="https://nicologiuliani.site/notes/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Course notes · Nicolò Giuliani">
+<meta property="og:description" content="Notes, exercises and projects from my CS degree at the University of Bologna.">
+<meta property="og:url" content="https://nicologiuliani.site/notes/">
+<meta property="og:image" content="https://nicologiuliani.site/assets/og.png">
+<link rel="stylesheet" href="/assets/style.css">
+<style>
+main{max-width:860px}
+.subjects{list-style:none; padding:0; margin:0; display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:.6rem}
+.subjects li{margin:0}
+.subjects a{display:block; border:1px solid var(--line); border-radius:6px; padding:.7rem .85rem; color:var(--fg); height:100%}
+.subjects a:hover{border-color:var(--accent); text-decoration:none}
+.subjects .name{font-weight:600; font-size:.95rem; display:block}
+.subjects .it{color:var(--muted); font-size:.82rem}
+.subjects .count{color:var(--muted); font-size:.8rem; display:block; margin-top:.35rem}
+
+.crumbs{font-size:.9rem; margin:0 0 .8rem; word-break:break-word}
+.crumbs a{color:var(--accent)}
+.crumbs .sep{color:var(--muted); margin:0 .3rem}
+.crumbs .here{font-weight:600}
+
+.browser{border:1px solid var(--line); border-radius:6px; overflow:hidden}
+.bar{display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap; padding:.55rem .85rem; background:var(--code-bg); border-bottom:1px solid var(--line); font-size:.85rem; color:var(--muted)}
+.bar a{font-size:.85rem}
+.listing{list-style:none; margin:0; padding:0}
+.listing li{margin:0; border-bottom:1px solid var(--line)}
+.listing li:last-child{border-bottom:none}
+.listing a{display:flex; align-items:center; gap:.6rem; padding:.45rem .85rem; color:var(--fg); font-size:.92rem}
+.listing a:hover{background:var(--code-bg); text-decoration:none}
+.listing a:focus-visible{outline:2px solid var(--accent); outline-offset:-2px}
+.listing .ico{width:1.1rem; flex:none; text-align:center; color:var(--muted)}
+.listing .dir .ico{color:var(--accent)}
+.listing .nm{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.listing .sz{color:var(--muted); font-size:.8rem; flex:none}
+
+.viewer{padding:1rem}
+.viewer img{max-width:100%; height:auto; display:block; margin:0 auto}
+.viewer.pdf{background:var(--code-bg); padding:.8rem}
+.viewer.pdf canvas{display:block; width:100%; height:auto; margin:0 auto .8rem; background:#fff; box-shadow:0 0 0 1px var(--line)}
+.viewer.pdf canvas:last-child{margin-bottom:0}
+.viewer pre{margin:0; border:0; border-radius:0; padding:0; background:none}
+.viewer.code{padding:0}
+.viewer.code pre{padding:.8rem 1rem}
+.viewer .md{font-size:.95rem}
+.viewer .md img{max-width:100%; margin:.5rem 0}
+.viewer .md table{border-collapse:collapse; display:block; overflow-x:auto}
+.viewer .md th,.viewer .md td{border:1px solid var(--line); padding:.3rem .55rem}
+.msg{padding:1.2rem .85rem; color:var(--muted); font-size:.92rem}
+.readme{margin-top:1.2rem}
+.hljs{background:none !important}
+</style>
+</head>
+<body>
+<main>
+  <a class="back-link" href="/">← Home</a>
+
+  <header>
+    <h1>Course notes</h1>
+    <p class="tagline">Notes, exercises and projects from my B.Sc. in Computer Science at the University of Bologna. Mostly in Italian, mostly LaTeX.</p>
+    <nav>
+      <a href="/notes/">All subjects</a>
+      <a href="https://github.com/nicologiuliani6/appunti_uni">Repository on GitHub</a>
+      <a href="https://nicologiuliani6.github.io/appunti_uni/atlante-uni.html">Interactive course map</a>
+    </nav>
+  </header>
+
+  <section id="app" aria-live="polite">
+    <p class="msg">Loading…</p>
+  </section>
+
+  <footer>Files are served directly from <a href="https://github.com/nicologiuliani6/appunti_uni">github.com/nicologiuliani6/appunti_uni</a>.</footer>
+</main>
+
+<script>
+(() => {
+  const OWNER = "nicologiuliani6", REPO = "appunti_uni", BRANCH = "main";
+  const SUBJECTS = [
+    { id: "algorithms",   name: "Data Structures and Algorithms",      it: "Algoritmi e strutture di dati",  path: "1/Algoritmi e strutture di dati" },
+    { id: "os",           name: "Operating Systems",                   it: "Sistemi operativi",              path: "2/so" },
+    { id: "networks",     name: "Computer Networks",                   it: "Reti di calcolatori",            path: "2/Reti" },
+    { id: "languages",    name: "Programming Languages",               it: "Linguaggi di programmazione",    path: "2/linguaggi" },
+    { id: "architecture", name: "Computer Architecture",               it: "Architettura degli elaboratori", path: "1/Architettura degli elaboratori" },
+    { id: "optimisation", name: "Combinatorial Optimisation",          it: "Ottimizzazione combinatoria",    path: "2/ottimizzazione" },
+    { id: "probability",  name: "Probability Calculus and Statistics", it: "Calcolo delle probabilità e statistica", path: "2/prob" },
+    { id: "logic",        name: "Logic for Computer Science",          it: "Logica per l'informatica",       path: "1/Logica per l'informatica" },
+  ];
+
+  const enc = p => p.split("/").map(encodeURIComponent).join("/");
+  const ghTree = p => `https://github.com/${OWNER}/${REPO}/tree/${BRANCH}/${enc(p)}`;
+  const ghBlob = p => `https://github.com/${OWNER}/${REPO}/blob/${BRANCH}/${enc(p)}`;
+  const raw    = p => `https://raw.githubusercontent.com/${OWNER}/${REPO}/${BRANCH}/${enc(p)}`;
+
+  const IMG  = /\.(png|jpe?g|gif|webp|svg|bmp)$/i;
+  const PDF  = /\.pdf$/i;
+  const MD   = /\.(md|markdown)$/i;
+  const TEXT = /\.(tex|txt|c|h|cpp|hpp|cc|java|py|js|ts|css|html?|json|xml|sh|bash|s|asm|hdl|tst|cmp|out|vm|jack|hack|mk|cmake|ya?ml|toml|ini|cfg|csv|sql|bib|sty|cls|go|rs|lua|pl|rb|php|kt|scala|hs|ml|lisp|scm|r|m|dot|gitignore|ld)$/i;
+  const NOEXT = /^(Makefile|Dockerfile|README|LICENSE|CMakeLists\.txt|\.mc\.menu)$/i;
+  const LANG = { tex:"latex", sty:"latex", cls:"latex", c:"c", h:"c", cpp:"cpp", hpp:"cpp", cc:"cpp", java:"java", py:"python",
+                 js:"javascript", ts:"typescript", css:"css", html:"xml", htm:"xml", xml:"xml", json:"json", sh:"bash", bash:"bash",
+                 s:"x86asm", asm:"x86asm", yml:"yaml", yaml:"yaml", sql:"sql", mk:"makefile", go:"go", rs:"rust", hs:"haskell" };
+
+  const app = document.getElementById("app");
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const human = n => n == null ? "" : n < 1024 ? n + " B" : n < 1048576 ? (n/1024).toFixed(1) + " KB" : (n/1048576).toFixed(1) + " MB";
+  const icon = (name, dir) => dir ? "▸" : IMG.test(name) ? "◧" : PDF.test(name) ? "▤" : "▫";
+
+  /* ---------- tree loading: live GitHub API, cached; snapshot as fallback ---------- */
+  let byDir = null, byName = null;
+  async function loadTree() {
+    const KEY = "appunti-tree-v1", TTL = 3600e3;
+    let tree = null;
+    try {
+      const c = JSON.parse(localStorage.getItem(KEY) || "null");
+      if (c && Date.now() - c.t < TTL) tree = c.tree;
+    } catch (e) {}
+    if (!tree) {
+      try {
+        const r = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}/git/trees/${BRANCH}?recursive=1`);
+        if (!r.ok) throw new Error(r.status);
+        const j = await r.json();
+        if (j.truncated) throw new Error("truncated");
+        tree = j.tree.map(e => e.type === "blob" ? { path: e.path, type: e.type, size: e.size } : { path: e.path, type: e.type });
+        try { localStorage.setItem(KEY, JSON.stringify({ t: Date.now(), tree })); } catch (e) {}
+      } catch (e) {
+        const r = await fetch("/notes/tree.json");   // snapshot, used if the API is rate-limited
+        tree = (await r.json()).tree;
+      }
+    }
+    byDir = new Map(); byName = new Map();
+    for (const e of tree) {
+      const i = e.path.lastIndexOf("/");
+      const parent = i < 0 ? "" : e.path.slice(0, i), name = e.path.slice(i + 1);
+      if (!byDir.has(parent)) byDir.set(parent, []);
+      byDir.get(parent).push({ ...e, name });
+      if (e.type === "blob" && !byName.has(name)) byName.set(name, e.path);
+    }
+    for (const list of byDir.values())
+      list.sort((a, b) => (a.type === b.type ? 0 : a.type === "tree" ? -1 : 1) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+  }
+
+  function countFiles(dir) {
+    let n = 0;
+    for (const e of byDir.get(dir) || []) n += e.type === "tree" ? countFiles(e.path) : 1;
+    return n;
+  }
+
+  /* ---------- lazy third-party libs (cdnjs) ---------- */
+  const loaded = {};
+  const script = src => loaded[src] ||= new Promise((ok, ko) => { const s = document.createElement("script"); s.src = src; s.onload = ok; s.onerror = ko; document.head.appendChild(s); });
+  const style = (href, media) => { if (loaded[href]) return; loaded[href] = 1; const l = document.createElement("link"); l.rel = "stylesheet"; l.href = href; if (media) l.media = media; document.head.appendChild(l); };
+  async function hljs() {
+    style("https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css", "(prefers-color-scheme: light)");
+    style("https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css", "(prefers-color-scheme: dark)");
+    await script("https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js");
+    await script("https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/latex.min.js").catch(() => {});
+    return window.hljs;
+  }
+  const marked = () => script("https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js").then(() => window.marked);
+
+  async function renderPdf(path, v) {
+    try {
+      await script("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js");
+      const lib = window.pdfjsLib;
+      lib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      const doc = await lib.getDocument(raw(path)).promise;
+      v.className = "viewer pdf"; v.innerHTML = "";
+      const width = v.clientWidth - 26, dpr = Math.min(devicePixelRatio || 1, 2);
+      // pages are rendered only when they scroll into view
+      const io = new IntersectionObserver(entries => entries.forEach(async en => {
+        if (!en.isIntersecting) return;
+        io.unobserve(en.target);
+        const page = await doc.getPage(+en.target.dataset.n);
+        const vp = page.getViewport({ scale: width / page.getViewport({ scale: 1 }).width * dpr });
+        en.target.width = vp.width; en.target.height = vp.height;
+        page.render({ canvasContext: en.target.getContext("2d"), viewport: vp });
+      }), { rootMargin: "800px" });
+      const first = await doc.getPage(1), ratio = first.getViewport({ scale: 1 });
+      for (let n = 1; n <= doc.numPages; n++) {
+        const c = document.createElement("canvas");
+        c.dataset.n = n; c.width = 100; c.height = Math.round(100 * ratio.height / ratio.width);
+        c.setAttribute("aria-label", `Page ${n}`);
+        v.appendChild(c); io.observe(c);
+      }
+    } catch (e) {
+      v.className = "viewer";
+      v.innerHTML = `<p class="msg">Could not render this PDF. <a href="${ghBlob(path)}">Open it on GitHub</a>.</p>`;
+    }
+  }
+
+  /* ---------- routing: /notes/#<subject-id>/<path inside subject> ---------- */
+  function route() {
+    const h = decodeURIComponent(location.hash.slice(1));
+    if (!h) return home();
+    const [id, ...rest] = h.split("/");
+    const s = SUBJECTS.find(x => x.id === id);
+    if (!s) return home();
+    const rel = rest.join("/");
+    const full = rel ? `${s.path}/${rel}` : s.path;
+    if (byDir.has(full)) return folder(s, rel, full);
+    const parent = byDir.get(full.slice(0, full.lastIndexOf("/"))) || [];
+    const f = parent.find(e => e.path === full);
+    if (f) return file(s, rel, f);
+    app.innerHTML = `<p class="msg">Not found. <a href="#${s.id}">Back to ${esc(s.name)}</a></p>`;
+  }
+  const link = (s, rel) => "#" + s.id + (rel ? "/" + rel.split("/").map(encodeURIComponent).join("/") : "");
+
+  function home() {
+    document.title = "Course notes · Nicolò Giuliani";
+    app.innerHTML = `<ul class="subjects">${SUBJECTS.map(s =>
+      `<li><a href="${link(s, "")}"><span class="name">${esc(s.name)}</span><span class="it">${esc(s.it)}</span><span class="count">${countFiles(s.path)} files</span></a></li>`).join("")}</ul>`;
+  }
+
+  function crumbs(s, rel) {
+    const parts = rel ? rel.split("/") : [];
+    let out = `<a href="#">Subjects</a><span class="sep">/</span>`;
+    out += parts.length ? `<a href="${link(s, "")}">${esc(s.name)}</a>` : `<span class="here">${esc(s.name)}</span>`;
+    parts.forEach((p, i) => {
+      out += `<span class="sep">/</span>`;
+      out += i === parts.length - 1 ? `<span class="here">${esc(p)}</span>` : `<a href="${link(s, parts.slice(0, i + 1).join("/"))}">${esc(p)}</a>`;
+    });
+    return `<p class="crumbs">${out}</p>`;
+  }
+
+  function folder(s, rel, full) {
+    document.title = `${rel ? rel.split("/").pop() + " · " : ""}${s.name} · Course notes`;
+    const items = byDir.get(full) || [];
+    const up = rel ? `<li class="dir"><a href="${link(s, rel.split("/").slice(0, -1).join("/"))}"><span class="ico">↰</span><span class="nm">..</span></a></li>` : "";
+    const rows = items.map(e => {
+      const r = rel ? `${rel}/${e.name}` : e.name, dir = e.type === "tree";
+      return `<li class="${dir ? "dir" : "file"}"><a href="${link(s, r)}"><span class="ico" aria-hidden="true">${icon(e.name, dir)}</span><span class="nm">${esc(e.name)}</span><span class="sz">${dir ? "" : human(e.size)}</span></a></li>`;
+    }).join("");
+    app.innerHTML = crumbs(s, rel) +
+      `<div class="browser"><div class="bar"><span>${items.length} item${items.length === 1 ? "" : "s"}</span><a href="${ghTree(full)}">View on GitHub</a></div><ul class="listing">${up}${rows}</ul></div>`;
+    const readme = items.find(e => e.type === "blob" && /^readme\.md$/i.test(e.name));
+    if (readme) {
+      const box = document.createElement("div"); box.className = "browser readme";
+      box.innerHTML = `<div class="bar"><span>${esc(readme.name)}</span></div><div class="viewer"><div class="md msg">Loading…</div></div>`;
+      app.appendChild(box);
+      renderMd(readme.path, box.querySelector(".md"));
+    }
+  }
+
+  async function renderMd(path, el) {
+    try {
+      const [txt, m] = await Promise.all([fetch(raw(path)).then(r => { if (!r.ok) throw 0; return r.text(); }), marked()]);
+      const dir = path.slice(0, path.lastIndexOf("/") + 1);
+      // Obsidian embeds ![[file.png]] are resolved by file name anywhere in the repo, like Obsidian does
+      const src = txt.replace(/!\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g, (_, n) => {
+        const p = byName.get(n.trim()) || byName.get(n.trim().split("/").pop());
+        return p ? `![${n}](${raw(p)})` : `*[missing: ${n}]*`;
+      });
+      el.className = "md";
+      el.innerHTML = m.parse(src);
+      el.querySelectorAll("img[src]").forEach(img => {
+        const s = img.getAttribute("src");
+        if (!/^(https?:|data:|\/)/.test(s)) img.src = raw(dir + decodeURIComponent(s));
+      });
+    } catch (e) { el.innerHTML = `Could not load this file. <a href="${ghBlob(path)}">Open it on GitHub</a>.`; }
+  }
+
+  async function file(s, rel, f) {
+    const name = f.name;
+    document.title = `${name} · ${s.name} · Course notes`;
+    app.innerHTML = crumbs(s, rel) +
+      `<div class="browser"><div class="bar"><span>${human(f.size)}</span><span><a href="${ghBlob(f.path)}">View on GitHub</a> &nbsp; <a href="${raw(f.path)}" download="${esc(name)}">Download</a></span></div><div class="viewer" id="v"><p class="msg">Loading…</p></div></div>`;
+    const v = document.getElementById("v");
+    if (IMG.test(name)) {
+      v.innerHTML = `<img src="${raw(f.path)}" alt="${esc(name)}">`;
+    } else if (PDF.test(name)) {
+      renderPdf(f.path, v);
+    } else if (MD.test(name)) {
+      renderMd(f.path, v);
+    } else if ((TEXT.test(name) || NOEXT.test(name) || !/\./.test(name)) && f.size < 1.5e6) {
+      try {
+        const r = await fetch(raw(f.path)); if (!r.ok) throw 0;
+        const txt = await r.text();
+        if (/\u0000/.test(txt.slice(0, 2000))) throw "bin";
+        v.className = "viewer code";
+        const ext = (name.match(/\.([^.]+)$/) || [])[1]?.toLowerCase();
+        v.innerHTML = `<pre><code>${esc(txt)}</code></pre>`;
+        if (LANG[ext] && txt.length < 300e3) {
+          const h = await hljs().catch(() => null);
+          if (h && h.getLanguage(LANG[ext])) v.querySelector("code").innerHTML = h.highlight(txt, { language: LANG[ext] }).value;
+        }
+      } catch (e) {
+        v.innerHTML = `<p class="msg">This file can't be previewed here. <a href="${ghBlob(f.path)}">Open it on GitHub</a>.</p>`;
+      }
+    } else {
+      v.innerHTML = `<p class="msg">This file can't be previewed here. <a href="${ghBlob(f.path)}">Open it on GitHub</a> or download it.</p>`;
+    }
+    window.scrollTo(0, 0);
+  }
+
+  loadTree().then(() => { route(); addEventListener("hashchange", route); })
+    .catch(() => { app.innerHTML = `<p class="msg">Could not load the file list. <a href="https://github.com/${OWNER}/${REPO}">Browse the notes on GitHub</a>.</p>`; });
+})();
+</script>
+<script data-goatcounter="https://nicologiuliani.goatcounter.com/count"
+        async src="//gc.zgo.at/count.js"></script>
+</body>
+</html>
