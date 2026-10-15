@@ -1,5 +1,7 @@
 # GitHub Pages builds this site with Jekyll, which skips files starting with
 # "_". The playgrounds load Python packages in the browser and need their
-# __init__.py files (docs/*/play/py/). blog/_template.html stays excluded.
+# dunder files (docs/*/play/py/). blog/_template.html stays excluded.
+# If a rebuild adds another file starting with "_", list it here too.
 include:
   - __init__.py
+  - __main__.py
