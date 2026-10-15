@@ -24,6 +24,12 @@ done
 "$SITE/tools/build-kairos-playground.sh" "$KAIROS"
 "$SITE/tools/build-mnemo-playground.sh" "$MNEMO" "$KAIROS"
 
+# Bump ?v=… on the playground assets so browsers fetch the new files at once
+# (GitHub Pages lets them cache for 10 minutes).
+V="$(date +%Y%m%d%H%M)"
+sed -i -E "s/\?v=[0-9]+/?v=$V/g" "$SITE/docs/kairos/index.html" "$SITE/docs/mnemo/index.html"
+echo "asset version: $V"
+
 echo
 echo "Next: test locally (python3 -m http.server 8000, open /docs/kairos/ and /docs/mnemo/),"
 echo "then commit docs/kairos/play and docs/mnemo/play."

@@ -44,6 +44,10 @@ git push</code></pre>
 
     <p>
       Lo script stampa l'hash dei commit da cui ha copiato i file: lo metto nel messaggio di commit.
+      Aggiorna anche il <code>?v=…</code> sugli URL dei file del playground nelle due pagine, così
+      i browser li riscaricano subito invece di usare la cache (10 minuti su GitHub Pages). Se
+      modifico a mano <code>playground.js</code>, <code>playground.css</code> o i worker, devo
+      cambiare quel numero anch'io (oppure lanciare lo script).
       Se un repo ha modifiche non committate, lo script avvisa e le copia lo stesso.
     </p>
 

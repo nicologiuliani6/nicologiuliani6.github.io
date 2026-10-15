@@ -3,7 +3,7 @@
 //
 // Emscripten starts the VM's pthreads from this same script URL, named
 // 'em-pthread': in that case the VM script sets itself up as a thread.
-importScripts('kairos-vm.js');
+importScripts('kairos-vm.js' + self.location.search);
 
 if (self.name !== 'em-pthread') {
   onmessage = async (e) => {
@@ -29,7 +29,8 @@ if (self.name !== 'em-pthread') {
         print: (t) => send('out', t),
         printErr: (t) => send('err', t),
         // stats: the VM prints "=== VM stats ===" (live cells) after the dump
-        preRun: [(mod) => { if (e.data.stats) mod.ENV.KAIROS_VM_STATS = '1'; }],
+        preRun: [(mod) => { if (e.data.stats && mod.ENV) mod.ENV.KAIROS_VM_STATS = '1'; }],
+        locateFile: (path, prefix) => prefix + path + self.location.search,
       });
     } catch (err) {
       flush();

@@ -22,7 +22,9 @@
 // })
 // KairosPlayground.highlight(text, language) returns the highlighted HTML.
 (function () {
-  const DEFAULT_VM_WORKER = new URL('vm-worker.js', document.currentScript.src).href;
+  // ?v=… on this script's URL is passed on, so a deploy never mixes cached old files with new ones
+  const SCRIPT_URL = new URL(document.currentScript.src);
+  const DEFAULT_VM_WORKER = new URL('vm-worker.js', SCRIPT_URL).href + SCRIPT_URL.search;
 
   const words = (s) => new Set(s.split(' '));
   const GRAMMARS = {

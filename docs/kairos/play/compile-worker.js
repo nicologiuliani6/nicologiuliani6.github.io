@@ -39,9 +39,9 @@ def compile_kairos(source):
 
 const ready = (async () => {
   const py = await loadPyodide();
-  const list = (await (await fetch('py/files.txt')).text()).split('\n').filter(Boolean);
+  const list = (await (await fetch('py/files.txt' + self.location.search)).text()).split('\n').filter(Boolean);
   await Promise.all(list.map(async (f) => {
-    const r = await fetch('py/' + f);
+    const r = await fetch('py/' + f + self.location.search);
     if (!r.ok) throw new Error(`could not load ${f} (HTTP ${r.status})`);
     const text = await r.text();
     const dir = (ROOT + '/' + f).replace(/\/[^/]*$/, '');

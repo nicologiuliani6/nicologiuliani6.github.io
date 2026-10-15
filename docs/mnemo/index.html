@@ -31,7 +31,7 @@
 }
 </script>
 <link rel="stylesheet" href="/assets/style.css">
-<link rel="stylesheet" href="../kairos/play/playground.css">
+<link rel="stylesheet" href="../kairos/play/playground.css?v=202610151453">
 </head>
 <body>
 <main>
@@ -276,11 +276,11 @@ mnemo compile prog.c [-o exe] [--keep-kairos]     # native executable: bytecode 
   <footer><a href="https://github.com/nicologiuliani6/mnemo">source on GitHub</a> · <a href="/">nicologiuliani.site</a> · <a href="https://github.com/sponsors/nicologiuliani6">Sponsor</a></footer>
 </main>
 
-<script src="../kairos/play/playground.js"></script>
+<script src="../kairos/play/playground.js?v=202610151453"></script>
 <script>
 KairosPlayground({
-  compileWorker: 'play/compile-worker.js',
-  vmWorker: 'play/vm-worker.js',
+  compileWorker: 'play/compile-worker.js?v=202610151453',
+  vmWorker: 'play/vm-worker.js?v=202610151453',
   language: 'c',
   timeoutMs: 60000,
   initial: 1,
@@ -310,7 +310,7 @@ KairosPlayground({
   },
   // The argc field only matters when main takes parameters.
   onSource: (text) => {
-    document.getElementById('opt-argc-row').hidden = !/\bmain\s*\(\s*int\b/.test(text);
+    document.getElementById('opt-argc-row').hidden = !/\bmain\s*\(\s*(?:const\s+)?(?:unsigned\s+|signed\s+)?(?:int|long|short|char)\b/.test(text);
   },
   vmStats: true,
   // Same filtering as `mnemo run`: hide the VM dump, turn `__mn_exit: N` into
@@ -341,7 +341,7 @@ KairosPlayground({
       done(ok) {
         const box = document.getElementById('play-stats');
         const item = (label, value, cls) => `<span>${label} <b${cls ? ` class="${cls}"` : ''}>${value}</b></span>`;
-        let html = ok
+        let html = ok !== false
           ? item('exit code', exit === null ? 0 : exit, exit ? 'bad' : '')
           : item('exit', 'VM error', 'bad');
         if (stats.cells_final !== undefined) {
