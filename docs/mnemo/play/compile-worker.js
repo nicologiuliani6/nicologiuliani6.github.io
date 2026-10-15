@@ -93,7 +93,9 @@ def compile_c(source):
 async function fetchTree(py, { base, dest }) {
   const list = (await (await fetch(base + 'files.txt')).text()).split('\n').filter(Boolean);
   await Promise.all(list.map(async (f) => {
-    const text = await (await fetch(base + f)).text();
+    const r = await fetch(base + f);
+    if (!r.ok) throw new Error(`could not load ${base + f} (HTTP ${r.status})`);
+    const text = await r.text();
     py.FS.mkdirTree((dest + '/' + f).replace(/\/[^/]*$/, ''));
     py.FS.writeFile(dest + '/' + f, text);
   }));

@@ -41,7 +41,9 @@ const ready = (async () => {
   const py = await loadPyodide();
   const list = (await (await fetch('py/files.txt')).text()).split('\n').filter(Boolean);
   await Promise.all(list.map(async (f) => {
-    const text = await (await fetch('py/' + f)).text();
+    const r = await fetch('py/' + f);
+    if (!r.ok) throw new Error(`could not load ${f} (HTTP ${r.status})`);
+    const text = await r.text();
     const dir = (ROOT + '/' + f).replace(/\/[^/]*$/, '');
     py.FS.mkdirTree(dir);
     py.FS.writeFile(ROOT + '/' + f, text);
