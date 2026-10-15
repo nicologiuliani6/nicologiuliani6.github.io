@@ -255,4 +255,9 @@
     });
   };
   window.KairosPlayground.highlight = highlight;
+
+  // Static code samples in the page text: <code class="language-kairos|c">
+  for (const el of document.querySelectorAll('code.language-kairos, code.language-c')) {
+    el.innerHTML = highlight(el.textContent, el.classList.contains('language-c') ? 'c' : 'kairos');
+  }
 })();

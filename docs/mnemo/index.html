@@ -62,7 +62,7 @@
       supported subset, Mnemo aims for the same output and exit code as <code>gcc</code>.
     </p>
 
-    <pre><code>#include &lt;stdio.h&gt;
+    <pre><code class="language-c">#include &lt;stdio.h&gt;
 int sq(int x) { return x * x; }
 int main(void) {
     int a[4] = {1, 2, 3, 4};
@@ -152,7 +152,7 @@ int main(void) {
 
     <p>Mnemo adds Kairos's <code>try</code> to C:</p>
 
-    <pre><code>try (x &lt; 10) {
+    <pre><code class="language-c">try (x &lt; 10) {
     x += step;           /* runs forwards */
 } rollback {
     attempts++;          /* if the condition is false: the body is undone, then this runs */

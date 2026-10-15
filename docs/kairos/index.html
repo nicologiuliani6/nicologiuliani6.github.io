@@ -117,7 +117,7 @@
       declared this way.
     </p>
 
-    <pre><code>local int x = 0
+    <pre><code class="language-kairos">local int x = 0
 local int y = x          // starts from the current value of x
 ...
 delocal int y = x        // y must still equal x
@@ -125,7 +125,7 @@ delocal int x = 0</code></pre>
 
     <h3>Conditionals and loops</h3>
 
-    <pre><code>if &lt;entry guard&gt; then
+    <pre><code class="language-kairos">if &lt;entry guard&gt; then
     ...
 else
     ...
@@ -156,7 +156,7 @@ until &lt;exit guard&gt;</code></pre>
 
     <h3>Parallelism and channels</h3>
 
-    <pre><code>par
+    <pre><code class="language-kairos">par
     ssend(&lt;x&gt;, c)
 and
     srecv(&lt;y&gt;, c)
@@ -178,7 +178,7 @@ rap</code></pre>
 
     <h3><code>try … rollback … yrt</code></h3>
 
-    <pre><code>try x == 7          // commit condition, evaluated after the body
+    <pre><code class="language-kairos">try x == 7          // commit condition, evaluated after the body
     x += 5
 rollback            // optional
     x += 99
