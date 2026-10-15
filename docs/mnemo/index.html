@@ -164,11 +164,19 @@ int main(void) {
       Pick an example, edit it if you like, and press <strong>Run</strong>. The first run downloads
       the Python runtime that hosts Mnemo (about 10 MB), so it takes a few seconds. Start from
       <strong>Blank</strong> to write your own program.
+      Under the output you get the exit code of <code>main</code> and how many VM cells the run
+      kept alive: at the end, on average and at the peak. Turn on
+      <code>--opt-uncall-user-calls</code> to watch those numbers drop. If <code>main</code> takes
+      <code>argc</code>, a field appears to set it.
     </p>
 
     <div class="play-tabs" id="play-tabs" role="group" aria-label="Examples"></div>
     <p class="play-desc" id="play-desc"></p>
     <textarea id="play-src" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="C source"></textarea>
+    <div class="play-opts">
+      <label><input type="checkbox" id="opt-uncall"> Free each call's history: <code>--opt-uncall-user-calls</code></label>
+      <label id="opt-argc-row" hidden><code>argc</code> for <code>main</code> <input type="number" id="opt-argc" min="0" step="1" placeholder="0"></label>
+    </div>
     <div class="play-bar">
       <button id="play-run" type="button">Run</button>
       <button id="play-stop" type="button" class="secondary" disabled>Stop</button>
@@ -177,6 +185,7 @@ int main(void) {
       <span id="play-status" aria-live="polite"></span>
     </div>
     <pre id="play-out" aria-live="polite"><span class="meta">Output appears here.</span></pre>
+    <div class="play-stats" id="play-stats" hidden></div>
     <details id="play-gen" hidden>
       <summary>Generated Kairos</summary>
       <pre><code id="play-gen-code"></code></pre>
@@ -289,13 +298,34 @@ KairosPlayground({
     { file: 'maze_backtrack.c', title: 'Maze',
       desc: 'A maze solver animated frame by frame. Each tentative move is a try; dead ends are marked x.' },
   ],
+  compileOptions: () => {
+    const argcRow = document.getElementById('opt-argc-row');
+    const argc = document.getElementById('opt-argc').value.trim();
+    return {
+      optUncall: document.getElementById('opt-uncall').checked,
+      mainArgc: !argcRow.hidden && argc !== '' ? Number(argc) : null,
+    };
+  },
+  // The argc field only matters when main takes parameters.
+  onSource: (text) => {
+    document.getElementById('opt-argc-row').hidden = !/\bmain\s*\(\s*int\b/.test(text);
+  },
+  vmStats: true,
   // Same filtering as `mnemo run`: hide the VM dump, turn `__mn_exit: N` into
   // the exit code, and treat the clear-screen escape as "clear the output".
+  // The exit code and the VM cell statistics go to the box under the output.
   filter: () => {
-    let inDump = false, exit = null;
+    let inDump = false, inStats = false, exit = null;
+    const stats = {};
     return {
       line(stream, text) {
         if (stream === 'err') return { text, cls: 'err' };
+        if (text.startsWith('=== VM stats ===')) { inStats = true; return null; }
+        if (inStats) {
+          const m = /^(cells_\w+):\s*(\S+)/.exec(text);
+          if (m) stats[m[1]] = m[2];
+          return null;
+        }
         if (inDump) return null;
         if (text.startsWith('=== VM dump ===')) { inDump = true; return null; }
         const m = /^__mn_exit:\s*(-?\d+)\s*$/.exec(text);
@@ -306,10 +336,23 @@ KairosPlayground({
         }
         return { text: text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '') };
       },
-      done: () => (exit === null ? null : `exit code ${exit}`),
+      done(ok) {
+        const box = document.getElementById('play-stats');
+        const item = (label, value, cls) => `<span>${label} <b${cls ? ` class="${cls}"` : ''}>${value}</b></span>`;
+        let html = ok
+          ? item('exit code', exit === null ? 0 : exit, exit ? 'bad' : '')
+          : item('exit', 'VM error', 'bad');
+        if (stats.cells_final !== undefined) {
+          html += item('cells at the end', stats.cells_final) + item('mean', stats.cells_mean) + item('max', stats.cells_max);
+        }
+        box.innerHTML = html;
+        box.hidden = false;
+        return null;
+      },
     };
   },
   onCompiled: (res) => {
+    document.getElementById('play-stats').hidden = true;
     const gen = document.getElementById('play-gen');
     gen.hidden = !res.kairos;
     document.getElementById('play-gen-code').innerHTML = KairosPlayground.highlight(res.kairos || '', 'kairos');

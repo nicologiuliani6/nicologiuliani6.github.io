@@ -28,6 +28,8 @@ if (self.name !== 'em-pthread') {
       M = await KairosVM({
         print: (t) => send('out', t),
         printErr: (t) => send('err', t),
+        // stats: the VM prints "=== VM stats ===" (live cells) after the dump
+        preRun: [(mod) => { if (e.data.stats) mod.ENV.KAIROS_VM_STATS = '1'; }],
       });
     } catch (err) {
       flush();

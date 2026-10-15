@@ -16,7 +16,7 @@ command -v emcc >/dev/null || { echo "emcc not found: source ~/emsdk/emsdk_env.s
 emcc -O2 -DNDEBUG -pthread \
   "$KAIROS/src/vm/Janus.c" "$KAIROS/src/vm/Janus_dap.c" -I"$KAIROS/src/vm" \
   -sMODULARIZE=1 -sEXPORT_NAME=KairosVM -sENVIRONMENT=worker \
-  -sEXPORTED_FUNCTIONS=_vm_run_from_string -sEXPORTED_RUNTIME_METHODS=stringToNewUTF8 \
+  -sEXPORTED_FUNCTIONS=_vm_run_from_string -sEXPORTED_RUNTIME_METHODS=stringToNewUTF8,ENV \
   -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=64MB -sSTACK_SIZE=16MB \
   -sDEFAULT_PTHREAD_STACK_SIZE=4MB -sPTHREAD_POOL_SIZE=8 -sEXIT_RUNTIME=0 \
   -Wno-pthreads-mem-growth \

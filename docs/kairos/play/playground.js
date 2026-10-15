@@ -13,8 +13,11 @@
 //   initial: index of the example loaded first,
 //   timeoutMs: run time limit,
 //   filter: () => ({ line(stream, text) -> {text, cls} | 'clear' | null | an array of these,
-//                    done() -> string | null }),
+//                    done(ok) -> string | null }),
 //   onCompiled: (result) => void,   result.extra holds what the compile worker adds
+//   compileOptions: () => object passed to the compile worker with the source,
+//   vmStats: true to have the VM print its cell statistics,
+//   onSource: (text) => void, called whenever the editor text changes
 //   language: 'kairos' | 'c'   (syntax highlighting in the editor)
 // })
 // KairosPlayground.highlight(text, language) returns the highlighted HTML.
@@ -82,7 +85,11 @@
     editor.append(hl, src);
     const syncScroll = () => { hl.scrollTop = src.scrollTop; hl.scrollLeft = src.scrollLeft; };
     // trailing space: a final newline must still get its own line in the <pre>
-    const render = () => { hlCode.innerHTML = highlight(src.value, language) + ' '; syncScroll(); };
+    const render = () => {
+      hlCode.innerHTML = highlight(src.value, language) + ' ';
+      syncScroll();
+      if (opts.onSource) opts.onSource(src.value);
+    };
     const setSource = (text) => { src.value = text; src.scrollTop = 0; render(); };
     src.addEventListener('input', render);
     src.addEventListener('scroll', syncScroll);
@@ -109,7 +116,8 @@
 
     function compile(source) {
       const id = nextId++;
-      return new Promise((resolve) => { pending.set(id, resolve); compiler.postMessage({ id, source }); });
+      const options = opts.compileOptions ? opts.compileOptions() : {};
+      return new Promise((resolve) => { pending.set(id, resolve); compiler.postMessage({ id, source, options }); });
     }
 
     function clearOut() { out.textContent = ''; }
@@ -182,14 +190,14 @@
         if (m.type === 'out') onVmLines(m.lines);
         else if (m.type === 'done') {
           if (m.text) print(m.text, 'err');
-          const extra = filter.done();
+          const extra = filter.done(m.ok);
           if (extra) print(extra, 'meta');
           const ms = Math.round(performance.now() - t0);
           finish(m.ok ? `done in ${ms} ms` : 'stopped with an error');
         }
       };
       vm.onerror = (e) => { print('VM error: ' + (e.message || 'worker failed'), 'err'); finish('VM error'); };
-      vm.postMessage({ bytecode: res.text });
+      vm.postMessage({ bytecode: res.text, stats: !!opts.vmStats });
       const limit = opts.timeoutMs || 15000;
       timer = setTimeout(() => { print(`Stopped after ${limit / 1000} s.`, 'meta'); finish('timed out'); }, limit);
     }

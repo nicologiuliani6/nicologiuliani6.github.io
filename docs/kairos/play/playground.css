@@ -35,3 +35,16 @@
 #play-out .err{color:#c2410c}
 #play-out .meta{color:var(--muted)}
 @media (prefers-color-scheme: dark){ #play-out .err{color:#fb923c} }
+/* Mnemo: compile options and the end-of-run summary */
+.play-opts{display:flex; flex-wrap:wrap; align-items:center; gap:.5rem 1.2rem; margin:0 0 .6rem; font-size:.85rem; color:var(--muted)}
+.play-opts label{display:inline-flex; align-items:center; gap:.4rem; cursor:pointer}
+.play-opts [hidden]{display:none}
+.play-opts code{font-size:.8rem}
+.play-opts input[type="number"]{width:4.5rem; font:inherit; padding:.15rem .35rem; color:var(--fg); background:var(--code-bg); border:1px solid var(--line); border-radius:4px}
+.play-stats{display:flex; flex-wrap:wrap; gap:.4rem 1.4rem; margin:-1rem 0 1rem; padding:.5rem .8rem; font-size:.82rem; color:var(--muted); border:1px solid var(--line); border-top:none; border-radius:0 0 4px 4px}
+.play-stats b{color:var(--fg); font-weight:600; font-variant-numeric:tabular-nums}
+.play-stats .bad{color:#c2410c}
+@media (prefers-color-scheme: dark){ .play-stats .bad{color:#fb923c} }
+#play-gen{margin:0 0 1rem}
+#play-gen summary{cursor:pointer; color:var(--muted); font-size:.88rem}
+#play-gen pre{margin-top:.5rem; max-height:26rem}

@@ -46,7 +46,7 @@ def _preprocess_file(path, cpp_path=None, cpp_args=()):
         raise RuntimeError('preprocessor: ' + '; '.join(errors))
     return out.getvalue()
 
-def compile_c(source):
+def compile_c(source, opt_uncall=False, main_argc=None):
     # Fresh modules every time: both compilers keep state in module globals.
     for name in [m for m in sys.modules if m.split('.')[0] in ('src', 'mnemo')]:
         del sys.modules[name]
@@ -57,7 +57,8 @@ def compile_c(source):
     with open('/tmp/program.c', 'w', encoding='utf-8') as f:
         f.write(source)
     try:
-        kairos = compile_c_to_kairos('/tmp/program.c')
+        kairos = compile_c_to_kairos('/tmp/program.c', main_argc=main_argc,
+                                     opt_uncall_user_calls=bool(opt_uncall))
     except MnemoCompileError as exc:
         return [False, f"mnemo: {exc}".replace('/tmp/program.c', 'program.c'), ""]
     except RecursionError:
@@ -110,9 +111,10 @@ const ready = (async () => {
   py.setStderr({ batched: (s) => log.push(s) });
   py.runPython(COMPILE);
   const compile = py.globals.get('compile_c');
-  return (source) => {
+  return (source, options = {}) => {
     log = [];
-    const [ok, text, kairos] = compile(source).toJs();
+    const argc = Number.isInteger(options.mainArgc) && options.mainArgc >= 0 ? options.mainArgc : null;
+    const [ok, text, kairos] = compile(source, !!options.optUncall, argc).toJs();
     return { ok, text, kairos, log };
   };
 })();
@@ -123,7 +125,7 @@ ready.then(() => postMessage({ type: 'ready' }),
 onmessage = async (e) => {
   try {
     const compile = await ready;
-    postMessage({ type: 'compiled', id: e.data.id, ...compile(e.data.source) });
+    postMessage({ type: 'compiled', id: e.data.id, ...compile(e.data.source, e.data.options) });
   } catch (err) {
     postMessage({ type: 'compiled', id: e.data.id, ok: false, text: String(err), log: [] });
   }
