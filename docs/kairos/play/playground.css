@@ -4,10 +4,27 @@
 .play-tabs button:hover{color:var(--accent); border-color:var(--accent)}
 .play-tabs button[aria-pressed="true"]{color:var(--fg); border-color:var(--fg)}
 .play-desc{font-size:.88rem; color:var(--muted); margin:0 0 .6rem; min-height:1.3em}
-#play-src{display:block; width:100%; min-height:22rem; resize:vertical; margin:0 0 .6rem;
-  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.85rem; line-height:1.45;
-  background:var(--code-bg); color:var(--fg); border:1px solid var(--line); border-radius:4px; padding:.8rem 1rem; tab-size:4; white-space:pre; overflow:auto}
+/* Editor: a transparent textarea over a <pre> holding the highlighted copy. */
+:root{ --hl-kw:#a626a4; --hl-type:#0e7490; --hl-fn:#4338ca; --hl-num:#b45309; --hl-str:#15803d; --hl-com:#6b7280; --hl-pre:#c2410c; }
+@media (prefers-color-scheme: dark){
+  :root{ --hl-kw:#d19bf2; --hl-type:#67d4e8; --hl-fn:#a5b4fc; --hl-num:#f5b85b; --hl-str:#8ad79b; --hl-com:#8b8f98; --hl-pre:#fb923c; }
+}
+.play-editor{position:relative; margin:0 0 .6rem}
+#play-src,.play-hl{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.85rem; line-height:1.45;
+  border:1px solid var(--line); border-radius:4px; padding:.8rem 1rem; tab-size:4; white-space:pre; letter-spacing:0; word-spacing:0}
+#play-src{position:relative; display:block; width:100%; min-height:22rem; resize:vertical; margin:0;
+  background:transparent; color:transparent; caret-color:var(--fg); overflow:auto}
+#play-src::selection{color:transparent; background:color-mix(in srgb, var(--accent) 30%, transparent)}
 #play-src:focus{outline:none; border-color:var(--accent)}
+.play-hl{position:absolute; inset:0; margin:0; overflow:hidden; background:var(--code-bg); color:var(--fg); pointer-events:none}
+.play-hl code{font:inherit; background:none; padding:0; border-radius:0}
+.hl-kw{color:var(--hl-kw)}
+.hl-type{color:var(--hl-type)}
+.hl-fn{color:var(--hl-fn)}
+.hl-num{color:var(--hl-num)}
+.hl-str{color:var(--hl-str)}
+.hl-com{color:var(--hl-com); font-style:italic}
+.hl-pre{color:var(--hl-pre)}
 .play-bar{display:flex; align-items:center; flex-wrap:wrap; gap:.6rem; margin:0 0 .6rem; font-size:.85rem}
 .play-bar button{font:inherit; font-size:.88rem; padding:.35rem 1rem; border-radius:4px; cursor:pointer; border:1px solid var(--accent); background:var(--accent); color:var(--bg)}
 .play-bar button.secondary{background:var(--bg); color:var(--fg); border-color:var(--line)}

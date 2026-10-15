@@ -272,6 +272,7 @@ mnemo compile prog.c [-o exe] [--keep-kairos]     # native executable: bytecode 
 KairosPlayground({
   compileWorker: 'play/compile-worker.js',
   vmWorker: 'play/vm-worker.js',
+  language: 'c',
   timeoutMs: 60000,
   initial: 1,
   examples: [
@@ -311,7 +312,7 @@ KairosPlayground({
   onCompiled: (res) => {
     const gen = document.getElementById('play-gen');
     gen.hidden = !res.kairos;
-    document.getElementById('play-gen-code').textContent = res.kairos || '';
+    document.getElementById('play-gen-code').innerHTML = KairosPlayground.highlight(res.kairos || '', 'kairos');
   },
 });
 </script>

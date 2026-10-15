@@ -147,6 +147,7 @@ git push</code></pre>
         <code>mnemo file.c</code> nel terminale.</li>
       <li>Provo anche <strong>Firefox</strong>: è più severo di Chrome sugli header (vedi sotto).</li>
       <li>Se vedo ancora la versione vecchia: Ctrl+Shift+R.</li>
+      <li>Dopo il push riprovo le pagine online: in locale i file con <code>_</code> iniziale ci sono sempre, online no (vedi sotto).</li>
     </ol>
 
     <h2 id="problemi">Problemi già incontrati</h2>
@@ -154,6 +155,13 @@ git push</code></pre>
     <table>
       <thead><tr><th>Sintomo</th><th>Causa e rimedio</th></tr></thead>
       <tbody>
+        <tr>
+          <td>Online (non in locale): <code>SyntaxError</code> su CSS in <code>__init__.py</code>, oppure "could not load … (HTTP 404)"</td>
+          <td>GitHub Pages usa Jekyll, che non pubblica i file il cui nome inizia con <code>_</code>.
+            Vanno elencati in <code>include</code> in <code>_config.yml</code> (ci sono
+            <code>__init__.py</code> e <code>__main__.py</code>). Per controllare dopo una rebuild:
+            <code>find docs -name '_*'</code>.</td>
+        </tr>
         <tr>
           <td>"VM error: worker failed" solo su Firefox</td>
           <td>Uno script di worker caricato da fuori la cartella della pagina non riceve gli header

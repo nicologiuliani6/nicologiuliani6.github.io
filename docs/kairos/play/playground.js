@@ -15,9 +15,51 @@
 //   filter: () => ({ line(stream, text) -> {text, cls} | 'clear' | null | an array of these,
 //                    done() -> string | null }),
 //   onCompiled: (result) => void,   result.extra holds what the compile worker adds
+//   language: 'kairos' | 'c'   (syntax highlighting in the editor)
 // })
+// KairosPlayground.highlight(text, language) returns the highlighted HTML.
 (function () {
   const DEFAULT_VM_WORKER = new URL('vm-worker.js', document.currentScript.src).href;
+
+  const words = (s) => new Set(s.split(' '));
+  const GRAMMARS = {
+    // reserved words from kairos/src/frontend/lexer.py, plus the builtins
+    kairos: {
+      kw: words('procedure local delocal call uncall if then else fi from do loop until par and rap try rollback yrt skip'),
+      type: words('int stack channel nil empty char'),
+      fn: words('show push pop ssend srecv'),
+      strings: false, preproc: false,
+    },
+    c: {
+      kw: words('if else for while do switch case default break continue return goto sizeof typedef struct union enum ' +
+                'static const extern volatile register inline restrict try rollback'),
+      type: words('void int char short long unsigned signed bool _Bool size_t int8_t int16_t int32_t int64_t ' +
+                  'uint8_t uint16_t uint32_t uint64_t NULL true false'),
+      fn: words('printf putchar puts malloc calloc free memcpy memset strlen strcmp strcpy'),
+      strings: true, preproc: true,
+    },
+  };
+  const TOKEN = /(\/\/[^\n]*|\/\*[\s\S]*?(?:\*\/|$))|("(?:\\.|[^"\\\n])*"?|'(?:\\.|[^'\\\n])*'?)|(^[ \t]*#[^\n]*)|\b(0[xX][0-9a-fA-F]+|\d+)\b|([A-Za-z_]\w*)/gm;
+  const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  function highlight(text, language) {
+    const g = GRAMMARS[language] || GRAMMARS.kairos;
+    let html = '', last = 0;
+    for (const m of text.matchAll(TOKEN)) {
+      let cls = null;
+      if (m[1]) cls = 'com';
+      else if (m[2]) cls = g.strings ? 'str' : null;
+      else if (m[3]) cls = g.preproc ? 'pre' : null;
+      else if (m[4]) cls = 'num';
+      else if (g.kw.has(m[5])) cls = 'kw';
+      else if (g.type.has(m[5])) cls = 'type';
+      else if (g.fn.has(m[5])) cls = 'fn';
+      if (!cls) continue;
+      html += esc(text.slice(last, m.index)) + `<span class="hl-${cls}">${esc(m[0])}</span>`;
+      last = m.index + m[0].length;
+    }
+    return html + esc(text.slice(last));
+  }
 
   window.KairosPlayground = function (opts) {
     const $ = (id) => document.getElementById(id);
@@ -26,6 +68,24 @@
     const base = opts.examplesBase || 'examples/';
     const passthrough = () => ({ line: (stream, text) => ({ text, cls: stream === 'out' ? null : stream }), done: () => null });
     const makeFilter = opts.filter || passthrough;
+    const language = opts.language || 'kairos';
+
+    // Highlighted copy behind the (transparent) textarea, kept in sync.
+    const editor = document.createElement('div');
+    editor.className = 'play-editor';
+    const hl = document.createElement('pre');
+    hl.className = 'play-hl';
+    hl.setAttribute('aria-hidden', 'true');
+    const hlCode = document.createElement('code');
+    hl.appendChild(hlCode);
+    src.parentNode.insertBefore(editor, src);
+    editor.append(hl, src);
+    const syncScroll = () => { hl.scrollTop = src.scrollTop; hl.scrollLeft = src.scrollLeft; };
+    // trailing space: a final newline must still get its own line in the <pre>
+    const render = () => { hlCode.innerHTML = highlight(src.value, language) + ' '; syncScroll(); };
+    const setSource = (text) => { src.value = text; src.scrollTop = 0; render(); };
+    src.addEventListener('input', render);
+    src.addEventListener('scroll', syncScroll);
 
     let compiler = null, compilerReady = null, nextId = 1, frontendLoaded = false;
     const pending = new Map();
@@ -138,14 +198,14 @@
       [...tabs.children].forEach((b) => b.setAttribute('aria-pressed', String(b === btn)));
       $('play-desc').textContent = ex.desc;
       dl.hidden = !ex.file;
-      if (ex.text !== undefined) { src.value = ex.text; return; }
+      if (ex.text !== undefined) { setSource(ex.text); return; }
       dl.href = base + ex.file;
       dl.setAttribute('download', ex.file);
       dl.textContent = 'Download ' + ex.file;
       try {
         const r = await fetch(base + ex.file);
-        src.value = r.ok ? await r.text() : '// could not load ' + ex.file;
-      } catch { src.value = '// could not load ' + ex.file; }
+        setSource(r.ok ? await r.text() : '// could not load ' + ex.file);
+      } catch { setSource('// could not load ' + ex.file); }
     }
 
     opts.examples.forEach((ex, i) => {
@@ -164,4 +224,5 @@
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!runBtn.disabled) run(); }
     });
   };
+  window.KairosPlayground.highlight = highlight;
 })();
