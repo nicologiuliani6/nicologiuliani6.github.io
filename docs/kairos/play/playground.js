@@ -220,8 +220,38 @@
     runBtn.addEventListener('click', run);
     stopBtn.addEventListener('click', () => { print('Stopped.', 'meta'); finish('stopped'); });
     src.addEventListener('focus', () => startCompiler().catch(() => {}), { once: true });
+    // Tab indents (Shift+Tab dedents) instead of leaving the editor. Esc then
+    // Tab still moves focus on, so keyboard users are not trapped.
+    const INDENT = '    ';
+    let tabLeaves = false;
+    const edit = (start, end, text) => {
+      src.setSelectionRange(start, end);
+      // execCommand keeps the browser's undo history; setRangeText is the fallback
+      if (!document.execCommand('insertText', false, text)) {
+        src.setRangeText(text, start, end, 'end');
+        render();
+      }
+    };
+    function indent(dedent) {
+      const v = src.value, a = src.selectionStart, b = src.selectionEnd;
+      if (!dedent && a === b) { edit(a, b, INDENT); return; }
+      const from = v.lastIndexOf('\n', a - 1) + 1;
+      const to = b > a && v[b - 1] === '\n' ? b - 1 : b;
+      const lines = v.slice(from, to).split('\n');
+      const changed = lines.map((l) => dedent ? l.replace(/^ {1,4}|^\t/, '') : INDENT + l);
+      const first = changed[0].length - lines[0].length;
+      const total = changed.join('\n').length - (to - from);
+      edit(from, to, changed.join('\n'));
+      src.setSelectionRange(Math.max(from, a + first), Math.max(from, b + total));
+    }
+    src.addEventListener('focus', () => { tabLeaves = false; });
     src.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!runBtn.disabled) run(); }
+      else if (e.key === 'Escape') tabLeaves = true;
+      else if (e.key === 'Tab' && !tabLeaves && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        e.preventDefault();
+        indent(e.shiftKey);
+      } else if (e.key !== 'Tab') tabLeaves = false;
     });
   };
   window.KairosPlayground.highlight = highlight;
