@@ -1,0 +1,212 @@
+// Operazioni bitwise sugli interi di Kairos (Kairos non ha & | << >>).
+// Tutto con `* / %` e confronti nativi nelle espressioni. Convenzione: gli
+// *_into fanno dst += f(...); gli altri argomenti restano inalterati salvo
+// dove indicato. Gli scarti intermedi vanno su __mn_hist.
+//
+// Bit k di x (shift aritmetico, come in C):  floor(x / 2^k) mod 2, con
+//   floor(x / p) = (x / p) - ((x % p) < 0)   e   m mod 2 = ((m % 2) + 2) % 2
+
+// dst += 2^n, n >= 0.
+procedure __mn_pow2_into(int dst, int n, stack __mn_hist, stack __mn_scratch)
+    local int p = 1
+    local int i = 0
+    if n != 0 then
+        from i == 0 do
+            local int np = 0
+            np += (p * 2)
+            p <=> np
+            push(np, __mn_hist)
+            delocal int np = 0
+            i += 1
+        loop until i == n
+    fi n != 0
+    dst += p
+    push(p, __mn_hist)
+    delocal int i = n
+    delocal int p = 0
+
+// q += a / 2, r += a % 2 (a >= 0, q = r = 0 all'ingresso); a = 0.
+procedure __mn_divmod_nonneg_div2(int a, int q, int r, stack __mn_hist, stack __mn_scratch)
+    q += (a / 2)
+    r += (a % 2)
+    a -= ((q * 2) + r)
+
+// q += floor(t / 2) (q = 0 all'ingresso); t = 0.
+procedure __mn_floor_div2_signed(int t, int q, stack __mn_hist, stack __mn_scratch)
+    q += ((t / 2) - ((t % 2) < 0))
+    local int r = 0
+    r += (t - (q * 2))
+    t -= ((q * 2) + r)
+    push(r, __mn_hist)
+    delocal int r = 0
+
+// bit_out += bit kk di a (shift aritmetico).
+procedure __mn_bit_k_signed(int a, int kk, int bit_out, stack __mn_hist, stack __mn_scratch)
+    local int p = 0
+    call __mn_pow2_into(p, kk, __mn_hist, __mn_scratch)
+    bit_out += (((((a / p) - ((a % p) < 0)) % 2) + 2) % 2)
+    uncall __mn_pow2_into(p, kk, __mn_hist, __mn_scratch)
+    delocal int p = 0
+
+// dst += (a & b) su 32 bit con segno: bit 0..30 col loro peso, bit 31 con
+// peso -2^31 (complemento a 2 di un int C).
+procedure __mn_and_into(int dst, int a, int b, stack __mn_hist, stack __mn_scratch)
+    local int k = 0
+    local int pow = 1
+    from k == 0 do
+        dst += ((((((a / pow) - ((a % pow) < 0)) % 2) + 2) % 2) * (((((b / pow) - ((b % pow) < 0)) % 2) + 2) % 2) * pow)
+        local int np = 0
+        np += (pow * 2)
+        pow <=> np
+        push(np, __mn_hist)
+        delocal int np = 0
+        k += 1
+    loop until k == 31
+    dst -= ((((((a / pow) - ((a % pow) < 0)) % 2) + 2) % 2) * (((((b / pow) - ((b % pow) < 0)) % 2) + 2) % 2) * pow)
+    push(pow, __mn_hist)
+    delocal int pow = 0
+    delocal int k = 31
+
+// dst += (a | b), stessa convenzione di __mn_and_into: bit = ba + bb - ba*bb.
+procedure __mn_or_into(int dst, int a, int b, stack __mn_hist, stack __mn_scratch)
+    local int k = 0
+    local int pow = 1
+    local int ba = 0
+    local int bb = 0
+    from k == 0 do
+        ba += (((((a / pow) - ((a % pow) < 0)) % 2) + 2) % 2)
+        bb += (((((b / pow) - ((b % pow) < 0)) % 2) + 2) % 2)
+        dst += (((ba + bb) - (ba * bb)) * pow)
+        push(bb, __mn_hist)
+        push(ba, __mn_hist)
+        local int np = 0
+        np += (pow * 2)
+        pow <=> np
+        push(np, __mn_hist)
+        delocal int np = 0
+        k += 1
+    loop until k == 31
+    ba += (((((a / pow) - ((a % pow) < 0)) % 2) + 2) % 2)
+    bb += (((((b / pow) - ((b % pow) < 0)) % 2) + 2) % 2)
+    dst -= (((ba + bb) - (ba * bb)) * pow)
+    push(bb, __mn_hist)
+    push(ba, __mn_hist)
+    delocal int bb = 0
+    delocal int ba = 0
+    push(pow, __mn_hist)
+    delocal int pow = 0
+    delocal int k = 31
+
+// dst += (a & b) su 64 bit (long long / uint64_t): bit 0..62 col loro peso,
+// bit 63 (il segno) con peso -2^63, sommato come due volte -2^62.
+procedure __mn_and64_into(int dst, int a, int b, stack __mn_hist, stack __mn_scratch)
+    local int k = 0
+    local int pow = 1
+    from k == 0 do
+        dst += ((((((a / pow) - ((a % pow) < 0)) % 2) + 2) % 2) * (((((b / pow) - ((b % pow) < 0)) % 2) + 2) % 2) * pow)
+        local int np = 0
+        np += (pow * 2)
+        pow <=> np
+        push(np, __mn_hist)
+        delocal int np = 0
+        k += 1
+    loop until k == 62
+    dst += ((((((a / pow) - ((a % pow) < 0)) % 2) + 2) % 2) * (((((b / pow) - ((b % pow) < 0)) % 2) + 2) % 2) * pow)
+    dst -= ((a < 0) * (b < 0) * pow)
+    dst -= ((a < 0) * (b < 0) * pow)
+    push(pow, __mn_hist)
+    delocal int pow = 0
+    delocal int k = 62
+
+// dst += (a | b) su 64 bit, stessa convenzione di __mn_and64_into.
+procedure __mn_or64_into(int dst, int a, int b, stack __mn_hist, stack __mn_scratch)
+    local int k = 0
+    local int pow = 1
+    local int ba = 0
+    local int bb = 0
+    from k == 0 do
+        ba += (((((a / pow) - ((a % pow) < 0)) % 2) + 2) % 2)
+        bb += (((((b / pow) - ((b % pow) < 0)) % 2) + 2) % 2)
+        dst += (((ba + bb) - (ba * bb)) * pow)
+        push(bb, __mn_hist)
+        push(ba, __mn_hist)
+        local int np = 0
+        np += (pow * 2)
+        pow <=> np
+        push(np, __mn_hist)
+        delocal int np = 0
+        k += 1
+    loop until k == 62
+    ba += (((((a / pow) - ((a % pow) < 0)) % 2) + 2) % 2)
+    bb += (((((b / pow) - ((b % pow) < 0)) % 2) + 2) % 2)
+    dst += (((ba + bb) - (ba * bb)) * pow)
+    push(bb, __mn_hist)
+    push(ba, __mn_hist)
+    ba += (a < 0)
+    bb += (b < 0)
+    dst -= (((ba + bb) - (ba * bb)) * pow)
+    dst -= (((ba + bb) - (ba * bb)) * pow)
+    push(bb, __mn_hist)
+    push(ba, __mn_hist)
+    delocal int bb = 0
+    delocal int ba = 0
+    push(pow, __mn_hist)
+    delocal int pow = 0
+    delocal int k = 62
+
+// dst += (x << n), n >= 0.
+procedure __mn_shl_into(int dst, int x, int n, stack __mn_hist, stack __mn_scratch)
+    local int p = 0
+    call __mn_pow2_into(p, n, __mn_hist, __mn_scratch)
+    dst += (x * p)
+    uncall __mn_pow2_into(p, n, __mn_hist, __mn_scratch)
+    delocal int p = 0
+
+// Dimezzamento UNSIGNED a 64 bit: q += x_u / 2, r += x_u % 2 dove x_u è x letto
+// come unsigned (x + 2^64 se x < 0); x = 0. Per x < 0: floor(x/2) + 2^63, che
+// si somma come (2^63 - 1) + 1 su un valore negativo, senza traboccare.
+procedure __mn_uhalve64(int x, int q, int r, stack __mn_hist, stack __mn_scratch)
+    local int f = 0
+    local int b = 0
+    local int neg = 0
+    f += ((x / 2) - ((x % 2) < 0))
+    b += (((x % 2) + 2) % 2)
+    neg += (x < 0)
+    x -= ((f * 2) + b)
+    q += f
+    if neg != 0 then
+        q += 9223372036854775807
+        q += 1
+    fi neg != 0
+    r += b
+    push(neg, __mn_hist)
+    delocal int neg = 0
+    push(b, __mn_hist)
+    delocal int b = 0
+    push(f, __mn_hist)
+    delocal int f = 0
+
+// dst += (x >> n) logico (unsigned, 64 bit): il primo dimezzamento unsigned
+// rende il valore non negativo, gli altri sono divisioni per 2.
+procedure __mn_shr_into(int dst, int x, int n, stack __mn_hist, stack __mn_scratch)
+    local int t = 0
+    t += x
+    local int i = 0
+    if n != 0 then
+        from i == 0 do
+            i += 1
+            local int qh = 0
+            local int ph = 0
+            call __mn_uhalve64(t, qh, ph, __mn_hist, __mn_scratch)
+            t += qh
+            push(ph, __mn_hist)
+            delocal int ph = 0
+            push(qh, __mn_hist)
+            delocal int qh = 0
+        loop until i == n
+    fi n != 0
+    dst += t
+    push(i, __mn_hist)
+    delocal int i = 0
+    push(t, __mn_hist)
+    delocal int t = 0

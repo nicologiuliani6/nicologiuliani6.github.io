@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Adds the COOP/COEP headers GitHub Pages can't send, so the playground's VM threads get SharedArrayBuffer -->
+<script>window.coi = { coepCredentialless: () => !!(window.chrome || window.netscape) };</script>
+<script src="coi-serviceworker.js"></script>
+<title>Kairos: a reversible, concurrent programming language</title>
+<meta name="description" content="Kairos is a reversible, concurrent language in the Janus family: every program runs forwards and backwards. Language reference and an in-browser playground.">
+<meta name="author" content="Nicolò Giuliani">
+<link rel="canonical" href="https://nicologiuliani.site/docs/kairos/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Kairos — a reversible, concurrent programming language">
+<meta property="og:description" content="A Janus-family language where every program runs forwards and backwards. Try it in the browser.">
+<meta property="og:url" content="https://nicologiuliani.site/docs/kairos/">
+<meta property="og:image" content="https://nicologiuliani.site/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nicologiuliani.site/assets/og.png">
+<meta name="twitter:title" content="Kairos — a reversible, concurrent programming language">
+<meta name="twitter:description" content="A Janus-family language where every program runs forwards and backwards. Try it in the browser.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Kairos — a reversible, concurrent programming language",
+  "description": "Documentation for Kairos, a reversible concurrent programming language in the Janus family: language reference, an in-browser playground, installation and tools.",
+  "url": "https://nicologiuliani.site/docs/kairos/",
+  "author": { "@type": "Person", "name": "Nicolò Giuliani", "url": "https://nicologiuliani.site/" },
+  "about": ["Reversible computing", "Janus", "Concurrency", "Programming language", "Virtual machine"]
+}
+</script>
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="play/playground.css">
+</head>
+<body>
+<main>
+  <a class="back-link" href="/">← Home</a>
+
+  <header>
+    <h1>Kairos</h1>
+    <p class="tagline">A reversible, concurrent programming language: every program runs forwards and backwards.</p>
+    <nav>
+      <a href="https://github.com/nicologiuliani6/kairos">Repository</a>
+      <a href="#language">Language</a>
+      <a href="#playground">Try it</a>
+      <a href="#errors">Errors</a>
+      <a href="#install">Install</a>
+      <a href="/kairos-thesis/tesi.pdf">Thesis</a>
+    </nav>
+  </header>
+
+  <article class="post-body">
+
+    <h2 id="what">What Kairos is</h2>
+
+    <p>
+      Kairos belongs to the <a href="https://en.wikipedia.org/wiki/Janus_(time-reversible_computing_programming_language)">Janus</a>
+      family. Every command has a well-defined inverse, and <code>uncall</code> runs a procedure
+      backwards. The reversible core (assignments, <code>if … fi</code>, <code>from … until</code>,
+      <code>local … delocal</code>, <code>call</code>/<code>uncall</code>) follows Janus one to one.
+      On top of it Kairos adds parallel blocks (<code>par … and … rap</code>), synchronous channels
+      with channel passing in π-calculus style, stacks, arrays and a
+      <code>try … rollback … yrt</code> construct.
+    </p>
+
+    <p>
+      The frontend is written in Python (PLY) and produces a textual bytecode. A VM written in C
+      interprets that bytecode both forwards and backwards. You can
+      <a href="#playground">run programs in this page</a>: the same frontend and VM run in your
+      browser.
+    </p>
+
+    <h2 id="language">The language</h2>
+
+    <h3>Types</h3>
+
+    <table>
+      <thead><tr><th>Type</th><th>Initial value</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td><code>int</code></td><td><code>0</code></td><td>signed 64-bit, arithmetic wraps modulo 2<sup>64</sup></td></tr>
+        <tr><td><code>int a[n]</code></td><td><code>n</code> cells</td><td>constant length, passed by reference</td></tr>
+        <tr><td><code>stack</code></td><td><code>nil</code></td><td>LIFO list of integers</td></tr>
+        <tr><td><code>channel</code></td><td><code>empty</code></td><td>synchronous (rendez-vous) channel</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Commands and their inverses</h3>
+
+    <table>
+      <thead><tr><th>Command</th><th>Inverse</th></tr></thead>
+      <tbody>
+        <tr><td><code>x += e</code></td><td><code>x -= e</code></td></tr>
+        <tr><td><code>x -= e</code></td><td><code>x += e</code></td></tr>
+        <tr><td><code>x ^= e</code>, <code>x &lt;=&gt; y</code></td><td>itself</td></tr>
+        <tr><td><code>local int x = v</code></td><td><code>delocal int x = v</code></td></tr>
+        <tr><td><code>push(x, s)</code></td><td><code>pop(x, s)</code></td></tr>
+        <tr><td><code>ssend(&lt;…&gt;, c)</code></td><td><code>srecv(&lt;…&gt;, c)</code></td></tr>
+        <tr><td><code>call p(…)</code></td><td><code>uncall p(…)</code></td></tr>
+        <tr><td><code>show(x)</code></td><td>itself (prints again)</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      The variable on the left of an assignment must not occur in <code>e</code>, otherwise the
+      assignment would lose information: <code>x += x</code> is rejected. Expressions support
+      <code>+ - * / %</code>, comparisons, <code>&amp;&amp;</code> and <code>||</code> (both
+      operands are always evaluated) and array cells.
+    </p>
+
+    <h3><code>local</code> and <code>delocal</code></h3>
+
+    <p>
+      As in Janus, <code>local … delocal</code> is a block. Each <code>delocal</code> closes the most
+      recent open <code>local</code> of the same statement list and states the value the variable
+      must hold at that point; the VM checks it. Outside <code>main</code> every variable is
+      declared this way.
+    </p>
+
+    <pre><code>local int x = 0
+local int y = x          // starts from the current value of x
+...
+delocal int y = x        // y must still equal x
+delocal int x = 0</code></pre>
+
+    <h3>Conditionals and loops</h3>
+
+    <pre><code>if &lt;entry guard&gt; then
+    ...
+else
+    ...
+fi &lt;exit assertion&gt;
+
+from &lt;entry guard&gt; do
+    ...
+loop
+    ...
+until &lt;exit guard&gt;</code></pre>
+
+    <p>
+      The <code>fi</code> assertion must be true after <code>then</code> and false after
+      <code>else</code>. When running backwards it tells the inverse which branch was taken. A
+      <code>from</code> guard must be true on entry and false every time the loop comes round
+      again (LoopError1 and LoopError2). <code>then</code>, <code>else</code>, <code>do</code> and
+      <code>loop</code> can be omitted.
+    </p>
+
+    <h3>Procedures</h3>
+
+    <p>
+      Parameters are passed by reference, and the arguments of one call must be distinct
+      variables. Every program has a <code>procedure main()</code>. <code>uncall p</code> runs
+      <code>p</code> backwards: the commands in reverse order, each replaced by its inverse. For
+      recursive procedures the frontend compiles an inverse body <code>p__inv</code>.
+    </p>
+
+    <h3>Parallelism and channels</h3>
+
+    <pre><code>par
+    ssend(&lt;x&gt;, c)
+and
+    srecv(&lt;y&gt;, c)
+rap</code></pre>
+
+    <p>
+      Each branch of a <code>par</code> runs in its own thread, and the block ends when all
+      branches end. Channels are synchronous: <code>ssend</code> waits for an <code>srecv</code>.
+      Sending empties the source, and receiving requires a zeroed destination. A payload can hold
+      ints, stacks and channels (endpoint passing). Inside a <code>par</code> each channel is a
+      binary session used by exactly two branches with complementary protocols.
+    </p>
+
+    <p>
+      Branches share no writable memory. The frontend rejects an <code>int</code> or array written
+      in one branch and used in another, also through called procedures. Branches communicate only
+      through channels.
+    </p>
+
+    <h3><code>try … rollback … yrt</code></h3>
+
+    <pre><code>try x == 7          // commit condition, evaluated after the body
+    x += 5
+rollback            // optional
+    x += 99
+yrt x == 7          // exit assertion</code></pre>
+
+    <p>
+      If the condition holds after the body, the body is kept. Otherwise the body is undone by
+      running it backwards, and the rollback runs. The <code>yrt</code> assertion must be true
+      after a commit and false after a rollback, like the <code>fi</code> of an <code>if</code>.
+      A <code>try</code> may not contain <code>par</code> or channel operations.
+    </p>
+
+    <h3>Output</h3>
+
+    <p>
+      <code>show(x)</code> prints <code>x: value</code> for any type, and <code>show(x, char)</code>
+      prints the low byte of <code>x</code> as a character. <code>show</code> is its own inverse, so
+      an <code>uncall</code> prints again, in reverse order. When the program ends the VM prints the
+      variables of <code>main</code> after <code>=== VM dump ===</code>.
+    </p>
+
+    <h2 id="playground">Try it</h2>
+
+    <p>
+      Pick an example, edit it if you like, and press <strong>Run</strong>. The first run downloads
+      the Python runtime that hosts the frontend (about 10 MB), so it takes a few seconds; later
+      runs are immediate. Start from <strong>Blank</strong> to write your own program.
+    </p>
+
+    <div class="play-tabs" id="play-tabs" role="group" aria-label="Examples"></div>
+    <p class="play-desc" id="play-desc"></p>
+    <textarea id="play-src" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="Kairos source"></textarea>
+    <div class="play-bar">
+      <button id="play-run" type="button">Run</button>
+      <button id="play-stop" type="button" class="secondary" disabled>Stop</button>
+      <a id="play-dl" href="#" download>Download file</a>
+      <span class="hint">Ctrl+Enter runs</span>
+      <span id="play-status" aria-live="polite"></span>
+    </div>
+    <pre id="play-out" aria-live="polite"><span class="meta">Output appears here.</span></pre>
+
+    <p>
+      More programs, including the ones that must be rejected, are in
+      <a href="https://github.com/nicologiuliani6/kairos/tree/main/examples">examples/</a>,
+      <a href="https://github.com/nicologiuliani6/kairos/tree/main/tests">tests/</a> and
+      <a href="https://github.com/nicologiuliani6/kairos/tree/main/test_error">test_error/</a>.
+    </p>
+
+    <h2 id="errors">Common errors</h2>
+
+    <table>
+      <thead><tr><th>Message</th><th>Cause</th></tr></thead>
+      <tbody>
+        <tr><td><code>DELOCAL: wrong final value</code></td><td>the variable does not hold the value stated in <code>delocal</code></td></tr>
+        <tr><td><code>[LOCAL] … does not close the local opened most recently</code></td><td><code>local</code>/<code>delocal</code> do not form a block</td></tr>
+        <tr><td><code>IF/FI not reversible (IfError)</code></td><td>the exit assertion does not match the branch taken</td></tr>
+        <tr><td><code>FROM: … (LoopError1)</code> / <code>(LoopError2)</code></td><td>loop guard false on entry / true when the loop comes round again</td></tr>
+        <tr><td><code>Pop-Err2</code></td><td><code>pop</code> into a variable that is not zero</td></tr>
+        <tr><td><code>Idx-Err</code> / <code>Div-Err</code></td><td>index out of bounds / division by zero</td></tr>
+        <tr><td><code>[STATIC] race on int in PAR</code></td><td>a variable written in one branch and used in another</td></tr>
+        <tr><td><code>[VM] SESSION: …</code></td><td>a channel used by more than two branches, or a deadlock</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      The full list of static and run-time checks is in the
+      <a href="https://github.com/nicologiuliani6/kairos#reversibility-rules-and-checks">README</a>.
+    </p>
+
+    <h2 id="install">Install locally</h2>
+
+    <p>One line installs the right package for your distribution (<code>.deb</code>, <code>.rpm</code> or Arch) and asks for the sudo password:</p>
+
+    <pre><code>curl -fsSL https://github.com/nicologiuliani6/kairos/releases/latest/download/install.sh | bash</code></pre>
+
+    <p>
+      You can also download a package from the
+      <a href="https://github.com/nicologiuliani6/kairos/releases">releases</a> and install it by
+      hand. The packages contain a standalone frontend and the VM, so you don't need Python.
+    </p>
+
+    <table>
+      <thead><tr><th>Distribution</th><th>Install</th></tr></thead>
+      <tbody>
+        <tr><td>Debian / Ubuntu</td><td><code>sudo apt install ./kairos_&lt;version&gt;_amd64.deb</code></td></tr>
+        <tr><td>Fedora / RHEL</td><td><code>sudo dnf install ./kairos-&lt;version&gt;-1.&lt;dist&gt;.x86_64.rpm</code></td></tr>
+        <tr><td>Arch Linux</td><td><code>sudo pacman -U ./kairos-&lt;version&gt;-1-x86_64.pkg.tar.zst</code></td></tr>
+      </tbody>
+    </table>
+
+    <p>Then:</p>
+
+    <pre><code>kairos program.kairos                  # compile and run
+kairos program.kairos --dump-bytecode  # also write the bytecode to bytecode.txt</code></pre>
+
+    <h3>From source</h3>
+
+    <p>You need <code>gcc</code>, <code>make</code> and Python ≥ 3.10 with <code>venv</code>.</p>
+
+    <pre><code>git clone https://github.com/nicologiuliani6/kairos.git
+cd kairos
+make install-deps                     # venv + ply
+make                                  # builds build/libvm.so
+make run FILE=examples/fib.kairos</code></pre>
+
+    <p>
+      <code>make test</code> runs every program in <code>tests/</code> and <code>examples/</code>.
+      <code>make test-error</code> checks that each program in <code>test_error/</code> is rejected
+      with the error it is tagged with.
+    </p>
+
+    <h2 id="tools">Debugger and related tools</h2>
+
+    <ul>
+      <li>
+        <a href="https://github.com/nicologiuliani6/kairos-vscode-debugger">kairos-vscode-debugger</a>:
+        a VS Code debugger with <em>Step Back</em> and <em>Reverse Continue</em>. A step back runs
+        the inverse of the previous instruction inside the VM.
+        Install: <code>curl -fsSL https://github.com/nicologiuliani6/kairos-vscode-debugger/releases/latest/download/install.sh | bash</code>
+      </li>
+      <li>
+        <a href="/docs/mnemo/">Mnemo</a> compiles a subset of C to Kairos.
+      </li>
+      <li>
+        <a href="/kairos-thesis/tesi.pdf">The thesis</a> covers the design and semantics of the
+        language.
+      </li>
+    </ul>
+
+    <h2 id="contact">Questions</h2>
+
+    <p>
+      Open an <a href="https://github.com/nicologiuliani6/kairos/issues">issue</a> on the
+      repository, or email <a href="mailto:me@nicologiuliani.site">me@nicologiuliani.site</a>.
+    </p>
+
+  </article>
+
+  <footer>MIT · <a href="https://github.com/nicologiuliani6/kairos">source on GitHub</a> · <a href="/">nicologiuliani.site</a> · <a href="https://github.com/sponsors/nicologiuliani6">Sponsor</a></footer>
+</main>
+
+<script src="play/playground.js"></script>
+<script>
+KairosPlayground({
+  compileWorker: 'play/compile-worker.js',
+  initial: 1,
+  examples: [
+    { title: 'Blank', desc: 'An empty main to start from. Write your own program and press Run.',
+      text: 'procedure main()\n    local int x = 0\n    x += 42\n    show(x)\n    delocal int x = 42\n' },
+    { file: 'fib.kairos', title: 'Fibonacci',
+      desc: 'Iterative and recursive Fibonacci, each followed by its uncall: the values go back to 0.' },
+    { file: 'producer_consumer.kairos', title: 'Producer / consumer',
+      desc: 'Two par branches exchange five items over a synchronous channel.' },
+    { file: 'fib_parallel.kairos', title: 'Parallel Fibonacci',
+      desc: 'Two recursive calls run in parallel in a par block, then summed.' },
+    { file: 'pi_calculus.kairos', title: 'π-calculus',
+      desc: 'A client sends a request together with a reply channel; then the whole exchange is undone. No output by design.' },
+    { file: 'try_backtracking.kairos', title: 'try / rollback',
+      desc: 'Greedy knapsack: a move that exceeds the budget is undone automatically.' },
+    { file: 'sat_solver.kairos', title: 'SAT solver',
+      desc: 'Parallel search on the first variable; every intermediate result is undone with uncall.' },
+    { file: 'sqrt.kairos', title: 'Square root (1982)',
+      desc: 'Integer square root from the 1982 Janus report by Lutz and Derby, run forwards and back.' },
+    { file: 'factorisation.kairos', title: 'Factorisation (1982)',
+      desc: 'Prime factorisation of 840, from the same report.' },
+  ],
+});
+</script>
+<script data-goatcounter="https://nicologiuliani.goatcounter.com/count"
+        async src="//gc.zgo.at/count.js"></script>
+</body>
+</html>

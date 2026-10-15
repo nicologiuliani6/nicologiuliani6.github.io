@@ -1,0 +1,45 @@
+// Backtracking with try/rollback: a greedy knapsack.
+//
+// Budget = 10, items weighing {6, 5, 4}. For each item we TRY to put it
+// in the knapsack: the body adds the weight and bumps the counter, then the
+// commit condition `load <= budget` decides:
+//   - true  → the move is valid and is kept (commit);
+//   - false → the move exceeds the budget: the body is UNDONE (rollback),
+//             like a backtrack that drops the choice and tries the next one.
+//
+// The `yrt` assertion must tell the two outcomes apart, like the `fi` of an
+// if: true after a commit, false after a rollback. Here it comes from the
+// counter `taken`, which only grows when the move is kept.
+//
+// Trace: 0 +6=6 (ok) ; 6 +5=11 (>10 → backtrack) ; 6 +4=10 (ok).
+// Result: load=10, items taken=2 (the 6 and the 4; the 5 is dropped).
+
+procedure main()
+    local int budget = 10
+    local int load = 0
+    local int taken = 0
+
+    // item 1: weight 6
+    try load <= budget
+        load += 6
+        taken += 1
+    yrt taken == 1
+
+    // item 2: weight 5  → 6+5 = 11 > 10 → move undone
+    try load <= budget
+        load += 5
+        taken += 1
+    yrt taken == 2
+
+    // item 3: weight 4  → 6+4 = 10 <= 10 → move kept
+    try load <= budget
+        load += 4
+        taken += 1
+    yrt taken == 2
+
+    show(load)               // expected: 10
+    show(taken)              // expected: 2
+
+    delocal int taken = 2
+    delocal int load = 10
+    delocal int budget = 10

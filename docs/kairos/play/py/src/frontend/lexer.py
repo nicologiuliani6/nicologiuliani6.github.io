@@ -1,0 +1,175 @@
+"""
+LEXER basilare per kairos concorrenziale
+Uso: python Jlexer.py <file>
+"""
+import sys
+import ply.lex as lex
+from .errors import KairosCompileError
+
+# parole riservate del linguaggio
+reserved = {
+    'procedure': 'PROCEDURE',
+    'int'      : 'INT',   'stack'   : 'STACK', 'nil'   : 'NIL',
+    'channel'  : 'CHANNEL', 'empty' : 'EMPT',
+    'skip'     : 'SKIP',
+    'local'    : 'LOCAL', 'delocal' : 'DELOCAL',
+    'call'     : 'CALL',  'uncall'  : 'UNCALL',
+    'if'       : 'IF',    'then'    : 'THEN',  'else'  : 'ELSE', 'fi': 'FI',
+    'from'     : 'FROM',  'do'      : 'DO',    'loop'  : 'LOOP',  'until' : 'UNTIL',
+    'par'      : 'PAR',   'and'     : 'AND',   'rap'   : 'RAP',
+    'try'      : 'TRY',   'rollback' : 'ROLLBACK', 'yrt' : 'YRT',
+}
+
+tokens = (
+    'PROCEDURE',
+    'INT', 'STACK', 'CHANNEL',
+    'ID',
+    'NUMBER', 'NIL', 'EMPT',
+    # confronto (tutti prima di EQUALS)
+    'EQEQ',                                # ==
+    'NEQ',                                 # !=
+    'ANDAND', 'OROR',                      # && ||
+    'GEQ',                                 # >=
+    'LEQ',                                 # <=
+    'GT',                                  # >
+    'LT',                                  # <
+    # assegnamento
+    'EQUALS',                              # =
+    'PLUSEQUALS', 'MINUSEQUALS', 'SWAP', 'XOREQUALS',   # operatori composti
+    'PLUS', 'MINUS', 'TIMES', 'DIVIDE', 'MOD',   # operatori semplici
+    'LBRACKET', 'RBRACKET',
+    'LPAREN', 'RPAREN',
+    'LOCAL', 'DELOCAL',
+    'CALL', 'UNCALL',
+    'IF', 'THEN', 'ELSE', 'FI',
+    'FROM', 'DO', 'LOOP', 'UNTIL',
+    'PAR', 'AND', 'RAP',
+    'TRY', 'ROLLBACK', 'YRT',
+    'SKIP',
+    'COMMA',
+)
+
+# identificatori e parole riservate
+def t_ID(t):
+    r'[a-zA-Z_][a-zA-Z0-9_]*'
+    t.type = reserved.get(t.value, 'ID')
+    return t
+
+def t_NUMBER(t):
+    r'\d+(?![a-zA-Z_])'
+    t.value = int(t.value)
+    # Gli interi sono a 64 bit: un letterale si legge modulo 2^64 (cosi' si
+    # scrivono anche le costanti senza segno fino a 2^64 - 1), oltre e' un errore.
+    if t.value >= 1 << 64:
+        raise KairosCompileError(
+            "LEXER", f"line {t.lineno}: literal {t.value} does not fit in 64 bits")
+    return t
+
+def t_INVALID_NUMBER_SUFFIX(t):
+    r'\d+[a-zA-Z_][a-zA-Z0-9_]*'
+    raise KairosCompileError(
+        "LEXER",
+        (
+            f"line {t.lexer.lineno}: invalid number '{t.value}' "
+            "(remove the suffix or separate it with spaces/operators)"
+        ),
+    )
+
+# ── Operatori composti: DEVONO stare PRIMA di quelli semplici ──────────────
+# Il lexer PLY usa la lunghezza della stringa per ordinare le funzioni-regex,
+# ma le stringhe semplici vengono ordinate per lunghezza decrescente
+# automaticamente. Per sicurezza usiamo funzioni per i token a 2 caratteri.
+
+def t_EQEQ(t):
+    r'=='
+    return t
+
+def t_NEQ(t):
+    r'!='
+    return t
+
+def t_ANDAND(t):
+    r'&&'
+    return t
+
+def t_OROR(t):
+    r'\|\|'
+    return t
+
+def t_SWAP(t):
+    r'<=>'
+    return t
+
+def t_GEQ(t):
+    r'>='
+    return t
+
+def t_LEQ(t):
+    r'<='
+    return t
+
+# Assegnamento reversibile  <=>  deve stare PRIMA di LEQ (<= già definito
+# come funzione, quindi l'ordine delle funzioni conta: PLY le ordina per
+# lunghezza del pattern, non per ordine di definizione.
+# '<=' ha lunghezza 2, '<=>' ha lunghezza 3 → '<=>' vince automaticamente
+# se definito come stringa; ma per chiarezza lo teniamo come funzione.
+
+
+def t_XOREQUALS(t):
+    r'\^='
+    return t
+
+def t_GT(t):
+    r'>'
+    return t
+
+def t_LT(t):
+    r'<'
+    return t
+
+t_PLUSEQUALS  = r'[+]='
+t_MINUSEQUALS = r'[-]='
+
+# operatori semplici
+t_EQUALS = r'='
+t_PLUS   = r'[+]'
+t_MINUS  = r'[-]'
+t_TIMES  = r'[*]'
+t_DIVIDE = r'/'
+t_MOD    = r'%'
+t_LBRACKET = r'\['
+t_RBRACKET = r'\]'
+
+# parentesi e virgole
+t_LPAREN = r'[(]'
+t_RPAREN = r'[)]'
+t_COMMA  = r'[,]'
+
+# ignora commenti
+t_ignore_COMMENT = r'//.*'
+
+# conta le righe
+def t_newline(t):
+    r'\n+'
+    t.lexer.lineno += len(t.value)
+
+# ignora spazi e tab
+t_ignore = ' \t'
+
+def t_error(t):
+    raise KairosCompileError(
+        "LEXER",
+        f"line {t.lexer.lineno}: unrecognized character '{t.value[0]}'",
+    )
+
+lexer = lex.lex()
+
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print("Usage: python lexer.py <file>")
+        sys.exit(1)
+    with open(sys.argv[1], 'r') as f:
+        source = f.read()
+    lexer.input(source)
+    for tok in lexer:
+        print(tok.type, tok.value)

@@ -1,0 +1,17 @@
+// Sposta il valore di src in dst (src azzerato) usando uno stack locale come "garbage" / condotto.
+// La VM implementa `pop(dst, …)` come `*dst += valore`: per sostituire dst, azzeralo prima con
+// `push(dst, hist)` sullo stack Janus del caller, poi `call __mn_move_int(dst, src)`.
+procedure __mn_move_int(int dst, int src, stack __mn_hist, stack __mn_scratch)
+    local stack __mn_g = nil
+    push(src, __mn_g)
+    pop(dst, __mn_g)
+    delocal stack __mn_g = nil
+
+// Mask x a 32 bit bassi: x = x & 0xFFFFFFFF (unsigned: il resto è sempre in
+// [0, 2^32), anche per x negativo). Il valore originale va su __mn_hist.
+procedure __mn_mask_u32(int x, stack __mn_hist, stack __mn_scratch)
+    local int lo = 0
+    lo += (((x % 4294967296) + 4294967296) % 4294967296)
+    x <=> lo
+    push(lo, __mn_hist)
+    delocal int lo = 0

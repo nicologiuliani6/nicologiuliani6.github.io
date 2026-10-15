@@ -1,0 +1,22 @@
+// Divisione e resto con `/` e `%` nativi di Kairos: semantica C99 (troncamento
+// verso zero, resto col segno del dividendo). q = 0 e r = 0 all'ingresso, b != 0.
+
+// Uscita: q = a/b, r = a%b, a = 0 (il dividendo è consumato).
+procedure __mn_divmod_nonneg(int a, int b, int q, int r, stack __mn_hist, stack __mn_scratch)
+    q += (a / b)
+    r += (a % b)
+    a -= ((q * b) + r)
+
+// Uscita: q = a/b, r = a%b, a e b inalterati.
+procedure __mn_divmod_signed(int a, int b, int q, int r, stack __mn_hist, stack __mn_scratch)
+    q += (a / b)
+    r += (a % b)
+
+// Uscita: q = a/b, r = a%b, a e b inalterati.
+procedure __mn_divmod_nonneg_fast(int a, int b, int q, int r, stack __mn_hist, stack __mn_scratch)
+    q += (a / b)
+    r += (a % b)
+
+// Uscita: r = a%b, a e b inalterati.
+procedure __mn_mod_signed(int a, int b, int r, stack __mn_hist, stack __mn_scratch)
+    r += (a % b)

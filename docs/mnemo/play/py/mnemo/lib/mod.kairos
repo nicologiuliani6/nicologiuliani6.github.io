@@ -1,0 +1,8 @@
+// Resto: r = 0 all'ingresso. Uscita: r = a % b, a = 0 (il quoziente va su hist).
+procedure __mn_mod_nonneg(int a, int b, int r, stack __mn_hist, stack __mn_scratch)
+    local int q = 0
+    q += (a / b)
+    r += (a % b)
+    a -= ((q * b) + r)
+    push(q, __mn_hist)
+    delocal int q = 0

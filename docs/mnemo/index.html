@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Adds the COOP/COEP headers GitHub Pages can't send, so the playground's VM threads get SharedArrayBuffer -->
+<script>window.coi = { coepCredentialless: () => !!(window.chrome || window.netscape) };</script>
+<script src="coi-serviceworker.js"></script>
+<title>Mnemo: compiling C to a reversible language</title>
+<meta name="description" content="Mnemo compiles a subset of C to Kairos, a reversible concurrent language, so the program can run forwards and backwards. Supported C, an in-browser playground and install.">
+<meta name="author" content="Nicolò Giuliani">
+<link rel="canonical" href="https://nicologiuliani.site/docs/mnemo/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Mnemo — compiling C to a reversible language">
+<meta property="og:description" content="A compiler from a subset of C to Kairos: the C program becomes one that can run forwards and backwards. Try it in the browser.">
+<meta property="og:url" content="https://nicologiuliani.site/docs/mnemo/">
+<meta property="og:image" content="https://nicologiuliani.site/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nicologiuliani.site/assets/og.png">
+<meta name="twitter:title" content="Mnemo — compiling C to a reversible language">
+<meta name="twitter:description" content="A compiler from a subset of C to Kairos: the C program becomes one that can run forwards and backwards. Try it in the browser.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Mnemo — compiling C to a reversible language",
+  "description": "Documentation for Mnemo, a compiler from a subset of C to the reversible concurrent language Kairos: how it works, supported C subset, an in-browser playground and installation.",
+  "url": "https://nicologiuliani.site/docs/mnemo/",
+  "author": { "@type": "Person", "name": "Nicolò Giuliani", "url": "https://nicologiuliani.site/" },
+  "about": ["Reversible computing", "Compiler", "C", "Kairos"]
+}
+</script>
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="../kairos/play/playground.css">
+</head>
+<body>
+<main>
+  <a class="back-link" href="/">← Home</a>
+
+  <header>
+    <h1>Mnemo</h1>
+    <p class="tagline">A compiler from a subset of C to Kairos: your C program runs forwards and backwards.</p>
+    <nav>
+      <a href="https://github.com/nicologiuliani6/mnemo">Repository</a>
+      <a href="#how">How it works</a>
+      <a href="#subset">C subset</a>
+      <a href="#playground">Try it</a>
+      <a href="#gcc">Differences from gcc</a>
+      <a href="#install">Install</a>
+    </nav>
+  </header>
+
+  <article class="post-body">
+
+    <h2 id="what">What Mnemo is</h2>
+
+    <p>
+      Mnemo compiles C to <a href="/docs/kairos/">Kairos</a>, a reversible concurrent language.
+      C destroys information all the time: <code>x = 5</code> loses the old value of
+      <code>x</code>. Mnemo saves every overwritten value on a history stack, so the whole run
+      stays invertible. The output is plain Kairos with no VM extensions. On programs in the
+      supported subset, Mnemo aims for the same output and exit code as <code>gcc</code>.
+    </p>
+
+    <pre><code>#include &lt;stdio.h&gt;
+int sq(int x) { return x * x; }
+int main(void) {
+    int a[4] = {1, 2, 3, 4};
+    int s = 0;
+    for (int i = 0; i &lt; 4; i++) s += sq(a[i]);
+    printf("%d\n", s);          /* 30 */
+    return 0;
+}</code></pre>
+
+    <p>
+      You can <a href="#playground">compile and run C in this page</a>: Mnemo, the Kairos frontend
+      and the Kairos VM run in your browser.
+    </p>
+
+    <h2 id="how">How it works</h2>
+
+    <pre><code>prog.c ─ gcc -E -DMNEMO ─ pycparser ─▶ AST
+      ─ rewrites (early returns, switch, static, stdlib…)
+      ─ layout: one memory cell per variable, array, field
+      ─ lowering: reversible assignments, history, if/from
+      ─ cells → Kairos array __mn_mem
+      ─ library procedures (printing, bits, division…)
+      ─ emit .kairos ─▶ Kairos VM</code></pre>
+
+    <h3>Reversibility</h3>
+
+    <p>
+      Every assignment becomes <code>push(x, __mn_hist); x += 5</code>: the old value goes onto
+      the history stack, and running backwards pops it again. C control flow becomes Kairos
+      <code>if … fi</code> and <code>from … until</code> with the exit assertions the inverse
+      needs. The cost is code size: the eight-line example above becomes about 1,200 lines of
+      Kairos. The playground shows the generated code for every program you run.
+    </p>
+
+    <h3>Memory</h3>
+
+    <p>
+      All named state (scalars, arrays, structs, globals) and the first part of the
+      <code>malloc</code> heap live in one Kairos array, <code>__mn_mem</code>, and a pointer is
+      an index into it. Kairos arrays cannot grow, so past the end of that array the heap
+      continues on a tape made of two Kairos stacks. <code>free</code> only reuses the most
+      recently allocated block.
+    </p>
+
+    <h3><code>--opt-uncall-user-calls</code></h3>
+
+    <p>
+      The history grows with every assignment. With this option, after <code>call f(…)</code>
+      Mnemo saves the cells <code>f</code> wrote, runs <code>uncall f</code> to empty the history
+      <code>f</code> produced, and puts the results back with an XOR swap. The result is the same
+      and long programs use much less memory. Recursive functions, functions with channels or
+      <code>par</code>, and some pointer writes are excluded.
+    </p>
+
+    <h2 id="subset">The C subset</h2>
+
+    <table>
+      <thead><tr><th>Area</th><th>Supported</th></tr></thead>
+      <tbody>
+        <tr><td>Types</td><td><code>int</code>, <code>unsigned</code>, <code>char</code>, <code>bool</code>, <code>short</code>/<code>long</code>/<code>long long</code> (as <code>int</code>), <code>size_t</code>, <code>int*_t</code>/<code>uint*_t</code>, <code>enum</code>, <code>struct</code>, <code>union</code>, <code>typedef</code>. No floating point.</td></tr>
+        <tr><td>Pointers</td><td><code>void *</code>, multi-level pointers, arithmetic, <code>&amp;x</code>, <code>&amp;s.field</code>, <code>&amp;a[i]</code>, <code>malloc</code>/<code>calloc</code>/<code>free</code></td></tr>
+        <tr><td>Arrays</td><td>multidimensional, initialisers (designated too), run-time indices. No VLAs.</td></tr>
+        <tr><td>Control flow</td><td><code>if</code>, <code>switch</code>, <code>while</code>, <code>do</code>, <code>for</code>, <code>break</code>, <code>continue</code>, <code>return</code> anywhere, ternary, short-circuit <code>&amp;&amp;</code>/<code>||</code>. No <code>goto</code> or <code>setjmp</code>.</td></tr>
+        <tr><td>Functions</td><td>recursion (mutual too), structs by value, function pointers. No user-defined variadic functions.</td></tr>
+        <tr><td><code>stdio.h</code></td><td><code>printf</code> (<code>%d %i %u %x %X %o %c %s %p</code>, width, flags), <code>putchar</code>, <code>puts</code></td></tr>
+        <tr><td><code>string.h</code></td><td><code>strlen</code>, <code>strcmp</code>, <code>strcpy</code>, <code>strcat</code>, <code>memcpy</code>, <code>memset</code>, <code>memmove</code>, <code>strdup</code> and more</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      The <a href="https://github.com/nicologiuliani6/mnemo#the-c-subset">README</a> has the
+      complete list, including <code>stdlib.h</code>, <code>strings.h</code> and
+      <code>stdarg.h</code>.
+    </p>
+
+    <h3>Parallelism</h3>
+
+    <p>
+      <code>mnemo_pthread_parallel2(f, g)</code> with two different functions becomes a Kairos
+      <code>par</code> block running two real threads. The branches share no writable memory, so a
+      global written by one branch and used by the other is a compile error. Branches communicate
+      through Kairos channels (<code>mnemo_kairos_channel_t</code> with
+      <code>ssend</code>/<code>srecv</code>), including channel passing.
+    </p>
+
+    <h3><code>try</code> / <code>rollback</code></h3>
+
+    <p>Mnemo adds Kairos's <code>try</code> to C:</p>
+
+    <pre><code>try (x &lt; 10) {
+    x += step;           /* runs forwards */
+} rollback {
+    attempts++;          /* if the condition is false: the body is undone, then this runs */
+}</code></pre>
+
+    <h2 id="playground">Try it</h2>
+
+    <p>
+      Pick an example, edit it if you like, and press <strong>Run</strong>. The first run downloads
+      the Python runtime that hosts Mnemo (about 10 MB), so it takes a few seconds. Start from
+      <strong>Blank</strong> to write your own program.
+    </p>
+
+    <div class="play-tabs" id="play-tabs" role="group" aria-label="Examples"></div>
+    <p class="play-desc" id="play-desc"></p>
+    <textarea id="play-src" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="C source"></textarea>
+    <div class="play-bar">
+      <button id="play-run" type="button">Run</button>
+      <button id="play-stop" type="button" class="secondary" disabled>Stop</button>
+      <a id="play-dl" href="#" download>Download file</a>
+      <span class="hint">Ctrl+Enter runs</span>
+      <span id="play-status" aria-live="polite"></span>
+    </div>
+    <pre id="play-out" aria-live="polite"><span class="meta">Output appears here.</span></pre>
+    <details id="play-gen" hidden>
+      <summary>Generated Kairos</summary>
+      <pre><code id="play-gen-code"></code></pre>
+    </details>
+
+    <p>
+      More programs are in
+      <a href="https://github.com/nicologiuliani6/mnemo/tree/main/tests/c">tests/c/</a>.
+      <code>make test-gcc-compat</code> runs 190 of them and checks that the output and exit code
+      match <code>gcc</code>.
+    </p>
+
+    <h2 id="gcc">Known differences from gcc</h2>
+
+    <ul>
+      <li><code>int</code> is 64-bit, so signed overflow does not wrap at 32 bits. <code>unsigned</code> does wrap correctly modulo 2<sup>32</sup>.</li>
+      <li><code>sizeof</code> a pointer is 4 (one cell).</li>
+      <li>Call arguments are evaluated left to right.</li>
+      <li>No real I/O (files, input), no signals, no <code>errno</code>.</li>
+      <li><code>printf</code>s from two parallel branches may interleave character by character.</li>
+    </ul>
+
+    <h2 id="install">Install locally</h2>
+
+    <p>
+      Mnemo needs Kairos, which provides the VM, and <code>gcc</code>, which it uses as the
+      preprocessor. One line installs both, Kairos first if it is missing, and asks for the sudo
+      password:
+    </p>
+
+    <pre><code>curl -fsSL https://github.com/nicologiuliani6/mnemo/releases/latest/download/install.sh | bash</code></pre>
+
+    <p>Or install the packages from the releases by hand:</p>
+
+    <table>
+      <thead><tr><th>Distribution</th><th>Install</th></tr></thead>
+      <tbody>
+        <tr><td>Debian / Ubuntu</td><td><code>sudo apt install ./kairos_&lt;version&gt;_amd64.deb ./mnemo_&lt;version&gt;_amd64.deb</code></td></tr>
+        <tr><td>Fedora / RHEL</td><td><code>sudo dnf install ./kairos-&lt;version&gt;-1.&lt;dist&gt;.x86_64.rpm ./mnemo-&lt;version&gt;-1.&lt;dist&gt;.x86_64.rpm</code></td></tr>
+        <tr><td>Arch Linux</td><td><code>sudo pacman -U ./kairos-&lt;version&gt;-1-x86_64.pkg.tar.zst ./mnemo-&lt;version&gt;-1-x86_64.pkg.tar.zst</code></td></tr>
+      </tbody>
+    </table>
+
+    <h3>From source</h3>
+
+    <p>Clone Kairos next to Mnemo (or set <code>KAIROS_ROOT=/path</code>) and build it:</p>
+
+    <pre><code>git clone https://github.com/nicologiuliani6/kairos.git
+git clone https://github.com/nicologiuliani6/mnemo.git
+(cd kairos &amp;&amp; make install-deps &amp;&amp; make)
+cd mnemo &amp;&amp; make venv          # .venv + pip install -e .</code></pre>
+
+    <p>Each release also ships a wheel: <code>pip install mnemo-&lt;version&gt;-py3-none-any.whl</code>.</p>
+
+    <h3 id="usage">Usage</h3>
+
+    <pre><code>mnemo prog.c [options]                           # compile to Kairos and run
+mnemo dump-kairos prog.c [-o out.kairos] [--stdout]  # write the generated Kairos
+mnemo compile prog.c [-o exe] [--keep-kairos]     # native executable: bytecode + libvm.so</code></pre>
+
+    <p>
+      <code>mnemo prog.c</code> prints the program's output and exits with the value returned by
+      <code>main</code>.
+    </p>
+
+    <table>
+      <thead><tr><th>Option</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td><code>--check-invertibility</code></td><td>runs <code>main</code>, then inverts it; the VM reports every step that cannot be undone</td></tr>
+        <tr><td><code>--opt-uncall-user-calls</code></td><td>after each eligible call, frees the history it produced</td></tr>
+        <tr><td><code>--auto</code></td><td>decides by itself whether to enable the option above</td></tr>
+        <tr><td><code>--main-argc N</code></td><td>value of <code>argc</code> (also set with a <code>// mnemo-main-argc: N</code> line in the source)</td></tr>
+        <tr><td><code>--vm-dump</code>, <code>--vm-stats</code></td><td>print the final VM dump / how many cells are still alive</td></tr>
+        <tr><td><code>--kairos PATH</code></td><td>Kairos executable to use</td></tr>
+        <tr><td><code>-v</code></td><td>print commands and exit codes on stderr</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="contact">Questions</h2>
+
+    <p>
+      Open an <a href="https://github.com/nicologiuliani6/mnemo/issues">issue</a> on the
+      repository, or email <a href="mailto:me@nicologiuliani.site">me@nicologiuliani.site</a>.
+    </p>
+
+  </article>
+
+  <footer><a href="https://github.com/nicologiuliani6/mnemo">source on GitHub</a> · <a href="/">nicologiuliani.site</a> · <a href="https://github.com/sponsors/nicologiuliani6">Sponsor</a></footer>
+</main>
+
+<script src="../kairos/play/playground.js"></script>
+<script>
+KairosPlayground({
+  compileWorker: 'play/compile-worker.js',
+  vmWorker: 'play/vm-worker.js',
+  timeoutMs: 60000,
+  initial: 1,
+  examples: [
+    { title: 'Blank', desc: 'An empty main to start from. Write your own program and press Run.',
+      text: '#include <stdio.h>\n\nint main(void) {\n    int x = 42;\n    printf("x = %d\\n", x);\n    return 0;\n}\n' },
+    { file: 'sum_squares.c', title: 'Sum of squares',
+      desc: 'The example from the top of the page: an array, a loop and a function call.' },
+    { file: 'try_rollback.c', title: 'try / rollback',
+      desc: 'Greedy knapsack: weights that overflow the budget are undone and counted.' },
+    { file: 'sat_solver.c', title: 'SAT solver',
+      desc: 'The rollback resets each failed candidate automatically. Exits with the winning assignment.' },
+    { file: 'encrypt.c', title: 'Feistel cipher',
+      desc: 'A four-round Feistel cipher: encrypt, then decrypt back to the plaintext.' },
+    { file: 'maze_backtrack.c', title: 'Maze',
+      desc: 'A maze solver animated frame by frame. Each tentative move is a try; dead ends are marked x.' },
+  ],
+  // Same filtering as `mnemo run`: hide the VM dump, turn `__mn_exit: N` into
+  // the exit code, and treat the clear-screen escape as "clear the output".
+  filter: () => {
+    let inDump = false, exit = null;
+    return {
+      line(stream, text) {
+        if (stream === 'err') return { text, cls: 'err' };
+        if (inDump) return null;
+        if (text.startsWith('=== VM dump ===')) { inDump = true; return null; }
+        const m = /^__mn_exit:\s*(-?\d+)\s*$/.exec(text);
+        if (m) { if (exit === null) exit = Number(m[1]); return null; }
+        if (text.includes('\x1b[2J')) {
+          const rest = text.slice(text.lastIndexOf('\x1b[2J') + 4).replace(/\x1b\[H/g, '');
+          return rest ? ['clear', { text: rest }] : 'clear';
+        }
+        return { text: text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '') };
+      },
+      done: () => (exit === null ? null : `exit code ${exit}`),
+    };
+  },
+  onCompiled: (res) => {
+    const gen = document.getElementById('play-gen');
+    gen.hidden = !res.kairos;
+    document.getElementById('play-gen-code').textContent = res.kairos || '';
+  },
+});
+</script>
+<script data-goatcounter="https://nicologiuliani.goatcounter.com/count"
+        async src="//gc.zgo.at/count.js"></script>
+</body>
+</html>

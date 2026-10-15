@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Aggiornare i playground</title>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<main>
+  <a class="back-link" href="/">← Home</a>
+
+  <header>
+    <h1>Aggiornare i playground</h1>
+    <p class="tagline">Nota personale, non linkata: cosa fare quando cambio Kairos o Mnemo.</p>
+    <nav>
+      <a href="#veloce">In breve</a>
+      <a href="#requisiti">Requisiti</a>
+      <a href="#cosa">Cosa viene copiato</a>
+      <a href="#esempi">Esempi</a>
+      <a href="#test">Test</a>
+      <a href="#problemi">Problemi</a>
+    </nav>
+  </header>
+
+  <article class="post-body">
+
+    <p>
+      Le pagine <a href="/docs/kairos/">/docs/kairos/</a> e <a href="/docs/mnemo/">/docs/mnemo/</a>
+      eseguono i programmi nel browser con una <strong>copia</strong> dei due progetti. Quando
+      modifico <code>../kairos</code> o <code>../mnemo</code>, il sito non si aggiorna da solo:
+      bisogna rigenerare la copia e fare commit.
+    </p>
+
+    <h2 id="veloce">In breve</h2>
+
+    <pre><code>cd ~/Desktop/nicologiuliani6.github.io
+tools/update-playgrounds.sh            # ricompila la VM e copia Kairos + Mnemo
+python3 -m http.server 8000            # poi apri le due pagine e premi Run
+git add docs/kairos/play docs/mnemo/play
+git commit -m "playgrounds: update to kairos &lt;hash&gt;, mnemo &lt;hash&gt;"
+git push</code></pre>
+
+    <p>
+      Lo script stampa l'hash dei commit da cui ha copiato i file: lo metto nel messaggio di commit.
+      Se un repo ha modifiche non committate, lo script avvisa e le copia lo stesso.
+    </p>
+
+    <h3>Solo uno dei due</h3>
+
+    <table>
+      <thead><tr><th>Ho cambiato</th><th>Comando</th></tr></thead>
+      <tbody>
+        <tr><td>VM in C (<code>kairos/src/vm/</code>)</td><td><code>tools/build-kairos-playground.sh</code> e poi <code>tools/build-mnemo-playground.sh</code> (Mnemo ha una copia della VM)</td></tr>
+        <tr><td>frontend Kairos (<code>kairos/src/frontend/</code>)</td><td><code>tools/build-kairos-playground.sh</code> (lo usa anche Mnemo, niente altro da fare)</td></tr>
+        <tr><td>Mnemo (<code>mnemo/mnemo/</code>)</td><td><code>tools/build-mnemo-playground.sh</code></td></tr>
+      </tbody>
+    </table>
+
+    <p>Nel dubbio: <code>tools/update-playgrounds.sh</code>, che fa tutto.</p>
+
+    <h2 id="requisiti">Requisiti</h2>
+
+    <ul>
+      <li><strong>Emscripten</strong> in <code>~/emsdk</code>, per compilare la VM in WebAssembly.
+        Lo script lo attiva da solo. Per reinstallarlo:
+        <code>git clone https://github.com/emscripten-core/emsdk.git ~/emsdk &amp;&amp; cd ~/emsdk &amp;&amp; ./emsdk install latest &amp;&amp; ./emsdk activate latest</code></li>
+      <li>Il <strong>venv di Kairos</strong> (<code>../kairos/venv</code>, da <code>make install-deps</code>):
+        da lì vengono PLY e il <code>pip</code> che scarica <code>pcpp</code>.</li>
+      <li>I due repo clonati accanto al sito: <code>~/Desktop/kairos</code> e <code>~/Desktop/mnemo</code>.
+        Altrimenti si passano i percorsi: <code>tools/update-playgrounds.sh /path/kairos /path/mnemo</code>.</li>
+    </ul>
+
+    <h2 id="cosa">Cosa viene copiato</h2>
+
+    <table>
+      <thead><tr><th>File nel sito</th><th>Da dove</th><th>Script</th></tr></thead>
+      <tbody>
+        <tr><td><code>docs/kairos/play/kairos-vm.js</code>, <code>.wasm</code></td><td><code>kairos/src/vm/Janus.c</code> + <code>Janus_dap.c</code>, compilati con <code>emcc</code></td><td>kairos</td></tr>
+        <tr><td><code>docs/kairos/play/py/src/</code></td><td><code>kairos/src/__init__.py</code> e <code>kairos/src/frontend/*.py</code></td><td>kairos</td></tr>
+        <tr><td><code>docs/kairos/play/py/ply/</code></td><td>PLY dal venv di Kairos</td><td>kairos</td></tr>
+        <tr><td><code>docs/mnemo/play/py/mnemo/</code></td><td><code>mnemo/mnemo/*.py</code>, <code>lib/*.kairos</code>, <code>fake_include/*.h</code></td><td>mnemo</td></tr>
+        <tr><td><code>docs/mnemo/play/py/pcpp/</code></td><td><code>pcpp==1.30</code> da pip (sostituisce <code>gcc -E</code>)</td><td>mnemo</td></tr>
+        <tr><td><code>docs/mnemo/play/kairos-vm.*</code>, <code>vm-worker.js</code></td><td>copiati da <code>docs/kairos/play/</code></td><td>mnemo</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      Ogni cartella <code>py/</code> ha un <code>files.txt</code> con l'elenco dei file da caricare in
+      Pyodide; lo rigenerano gli script. Se aggiungo un modulo Python a Kairos o a Mnemo viene
+      preso in automatico, purché stia nelle cartelle sopra.
+    </p>
+
+    <p>Scritti a mano, non generati (gli script non li toccano):</p>
+    <ul>
+      <li><code>docs/kairos/play/playground.js</code> e <code>playground.css</code>: l'interfaccia, condivisa dalle due pagine;</li>
+      <li><code>docs/kairos/play/compile-worker.js</code>: Pyodide → bytecode Kairos;</li>
+      <li><code>docs/mnemo/play/compile-worker.js</code>: Pyodide → Mnemo → bytecode, con il ponte <code>pcpp</code>;</li>
+      <li><code>docs/kairos/play/vm-worker.js</code>: esegue il bytecode sulla VM (lo script lo copia anche in <code>docs/mnemo/play/</code>).</li>
+    </ul>
+
+    <p>
+      Devo toccarli solo se cambia l'interfaccia tra i pezzi: la funzione C
+      <code>vm_run_from_string</code>, le funzioni Python usate dai compile worker
+      (<code>parser.parse</code>, <code>desugar_try</code>, <code>run_static_checks</code>,
+      <code>ByteCode_Compiler</code>, <code>compile_c_to_kairos</code>,
+      <code>mnemo.c_parse.preprocess_file</code>) o il formato del bytecode in coda.
+    </p>
+
+    <h2 id="esempi">File di esempio</h2>
+
+    <p>
+      Gli esempi delle pagine (<code>docs/kairos/examples/</code>, <code>docs/mnemo/examples/</code>)
+      <strong>non</strong> vengono aggiornati dagli script: sono copie tradotte in inglese e
+      rinominate. Se cambio la sintassi o un esempio originale, li aggiorno a mano.
+    </p>
+
+    <table>
+      <thead><tr><th>Nel sito</th><th>Originale</th></tr></thead>
+      <tbody>
+        <tr><td><code>kairos/examples/fib.kairos</code></td><td><code>kairos/examples/fib.kairos</code></td></tr>
+        <tr><td><code>fib_parallel.kairos</code></td><td><code>fib_parallelo.kairos</code></td></tr>
+        <tr><td><code>producer_consumer.kairos</code></td><td><code>prod_cons_parallelo.kairos</code></td></tr>
+        <tr><td><code>pi_calculus.kairos</code>, <code>try_backtracking.kairos</code>, <code>sat_solver.kairos</code></td><td>stesso nome</td></tr>
+        <tr><td><code>sqrt.kairos</code>, <code>factorisation.kairos</code></td><td><code>janus1982/radice.kairos</code>, <code>janus1982/fattorizzazione.kairos</code></td></tr>
+        <tr><td><code>mnemo/examples/try_rollback.c</code></td><td><code>tests/c/examples/ex36_try_rollback.c</code></td></tr>
+        <tr><td><code>sat_solver.c</code>, <code>encrypt.c</code>, <code>maze_backtrack.c</code></td><td><code>tests/c/examples_advanced/</code></td></tr>
+        <tr><td><code>sum_squares.c</code></td><td>l'esempio del README di Mnemo</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      Per aggiungere un esempio: metto il file nella cartella <code>examples/</code> della pagina e
+      aggiungo una voce all'array <code>examples</code> in fondo a <code>index.html</code>
+      (<code>{ file, title, desc }</code>). La scheda "Blank" è la voce con <code>text</code> al
+      posto di <code>file</code>.
+    </p>
+
+    <h2 id="test">Test prima del push</h2>
+
+    <ol>
+      <li><code>python3 -m http.server 8000</code> dalla radice del sito.</li>
+      <li>Apro <code>http://localhost:8000/docs/kairos/</code> e <code>/docs/mnemo/</code>. Alla prima
+        visita la pagina si ricarica da sola: è il service worker.</li>
+      <li>Premo Run su ogni scheda e confronto con <code>kairos file.kairos</code> e
+        <code>mnemo file.c</code> nel terminale.</li>
+      <li>Provo anche <strong>Firefox</strong>: è più severo di Chrome sugli header (vedi sotto).</li>
+      <li>Se vedo ancora la versione vecchia: Ctrl+Shift+R.</li>
+    </ol>
+
+    <h2 id="problemi">Problemi già incontrati</h2>
+
+    <table>
+      <thead><tr><th>Sintomo</th><th>Causa e rimedio</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>"VM error: worker failed" solo su Firefox</td>
+          <td>Uno script di worker caricato da fuori la cartella della pagina non riceve gli header
+            COOP/COEP del service worker. Ogni pagina deve avere la sua copia di
+            <code>vm-worker.js</code> e della VM nella propria cartella (per Mnemo lo fa lo script).</td>
+        </tr>
+        <tr>
+          <td>"this page is not cross-origin isolated"</td>
+          <td>Il service worker <code>coi-serviceworker.js</code> non è attivo: ricaricare. Nelle
+            finestre private può essere bloccato. Ogni pagina con playground deve includerlo
+            come primo script nell'<code>&lt;head&gt;</code>.</td>
+        </tr>
+        <tr>
+          <td>Il playground resta su "running…" anche per programmi senza <code>par</code></td>
+          <td>I thread della VM partono dall'URL di <code>vm-worker.js</code>, che deve caricare
+            <code>kairos-vm.js</code> e non registrare <code>onmessage</code> quando
+            <code>self.name === 'em-pthread'</code>.</td>
+        </tr>
+        <tr>
+          <td>Errori di compilazione C con il numero di riga sbagliato</td>
+          <td>Il ponte <code>pcpp</code> antepone gli <code>#include</code> forzati: serve la riga
+            <code>#line 1</code> dopo di loro (già nel compile worker di Mnemo).</td>
+        </tr>
+        <tr>
+          <td>Output diverso da <code>mnemo</code> nativo</td>
+          <td>Controllare che <code>pcpp</code> dia lo stesso preprocessing di <code>gcc -E</code>:
+            confrontare <code>compile_c_to_kairos</code> con i due preprocessori su
+            <code>tests/c/examples/*.c</code> (l'ultima volta 55 su 55 identici).</td>
+        </tr>
+        <tr>
+          <td>Warning <code>shift count &gt;= width of type</code> compilando la VM</td>
+          <td>In WebAssembly i puntatori sono a 32 bit: <code>p &gt;&gt; 32</code> su un
+            <code>uintptr_t</code> va fatto passando per <code>uint64_t</code>
+            (vedi <code>vm_ops.h</code>, codifica dei canali).</td>
+        </tr>
+        <tr>
+          <td>Il labirinto di Mnemo impiega ~30 s su Firefox</td>
+          <td>Firefox è più lento di Chrome su questa VM WebAssembly (Chrome ~4 s, nativo ~3 s).
+            Non è un blocco; il limite di Mnemo è 60 s (<code>timeoutMs</code> in <code>index.html</code>).</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Versioni fissate</h3>
+
+    <ul>
+      <li>Pyodide <code>v0.27.2</code> dalla CDN jsDelivr, nei due <code>compile-worker.js</code>. Mnemo usa il <code>pycparser</code> incluso in Pyodide.</li>
+      <li><code>pcpp==1.30</code> in <code>build-mnemo-playground.sh</code>.</li>
+      <li><code>coi-serviceworker</code> 0.1.7, copiato in <code>docs/kairos/</code> e <code>docs/mnemo/</code>.</li>
+    </ul>
+
+  </article>
+
+  <footer>Pagina non linkata e non indicizzata · <a href="/">nicologiuliani.site</a></footer>
+</main>
+</body>
+</html>

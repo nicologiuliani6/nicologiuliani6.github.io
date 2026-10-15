@@ -1,0 +1,7 @@
+// Prodotto: dst += a * b (`*` nativo nelle espressioni Kairos). a e b inalterati.
+procedure __mn_mul_into(int dst, int a, int b, stack __mn_hist, stack __mn_scratch)
+    dst += (a * b)
+
+// Come __mn_mul_into, b di segno qualsiasi.
+procedure __mn_mul_signed_into(int dst, int a, int b, stack __mn_hist, stack __mn_scratch)
+    dst += (a * b)

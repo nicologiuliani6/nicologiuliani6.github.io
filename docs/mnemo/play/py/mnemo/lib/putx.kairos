@@ -1,0 +1,438 @@
+// Stampa intero non negativo in esadecimale minuscolo.
+// Dipendenze: helpers.kairos, divmod.kairos.
+// REVERSIBILE via `uncall __mn_divmod_nonneg` (vedi __mn_putd_uint).
+
+procedure __mn_putx_uint(int n, stack __mn_hist, stack __mn_scratch)
+    local int base = 0
+    base += 16
+    local int qu = 0
+    local int rem = 0
+    if n >= base then
+        call __mn_divmod_nonneg_fast(n, base, qu, rem, __mn_hist, __mn_scratch)
+        call __mn_putx_uint(qu, __mn_hist, __mn_scratch)
+        local int ch = 0
+        local int ten = 0
+        ten += 10
+        if rem >= ten then
+            ch += rem
+            ch += 87
+            show(ch, char)
+            ch -= 87
+            ch -= rem
+        else
+            ch += rem
+            ch += 48
+            show(ch, char)
+            ch -= 48
+            ch -= rem
+        fi rem >= ten
+        ten -= 10
+        delocal int ten = 0
+        delocal int ch = 0
+        uncall __mn_divmod_nonneg_fast(n, base, qu, rem, __mn_hist, __mn_scratch)
+    else
+        local int ch = 0
+        local int ten = 0
+        ten += 10
+        if n >= ten then
+            ch += n
+            ch += 87
+            show(ch, char)
+            ch -= 87
+            ch -= n
+        else
+            ch += n
+            ch += 48
+            show(ch, char)
+            ch -= 48
+            ch -= n
+        fi n >= ten
+        ten -= 10
+        delocal int ten = 0
+        delocal int ch = 0
+    fi n >= base
+    base -= 16
+    delocal int rem = 0
+    delocal int qu = 0
+    delocal int base = 0
+
+procedure __mn_putx(int n, stack __mn_hist, stack __mn_scratch)
+    call __mn_putx_uint(n, __mn_hist, __mn_scratch)
+
+// Conta le cifre esadecimali di un n >= 0 (n=0 conta 1).
+// d += hex_digits(n). Reversibile via uncall divmod_nonneg.
+procedure __mn_hcount_unsigned(int n, int d, stack __mn_hist, stack __mn_scratch)
+    local int base = 0
+    base += 16
+    local int q = 0
+    local int r = 0
+    if n >= base then
+        call __mn_divmod_nonneg_fast(n, base, q, r, __mn_hist, __mn_scratch)
+        call __mn_hcount_unsigned(q, d, __mn_hist, __mn_scratch)
+        d += 1
+        uncall __mn_divmod_nonneg_fast(n, base, q, r, __mn_hist, __mn_scratch)
+    else
+        d += 1
+    fi n >= base
+    base -= 16
+    delocal int r = 0
+    delocal int q = 0
+    delocal int base = 0
+
+// `%Nx` runtime: emette (N - hex_digits(n)) spazi a sinistra, poi __mn_putx.
+procedure __mn_putx_width(int n, int width, stack __mn_hist, stack __mn_scratch)
+    local int d = 0
+    call __mn_hcount_unsigned(n, d, __mn_hist, __mn_scratch)
+    local int pad = 0
+    pad += width
+    pad -= d
+    local int zp = 0
+    if pad > zp then
+        call __mn_emit_spaces(pad, __mn_hist, __mn_scratch)
+    fi pad > zp
+    delocal int zp = 0
+    call __mn_putx(n, __mn_hist, __mn_scratch)
+    pad += d
+    pad -= width
+    delocal int pad = 0
+    uncall __mn_hcount_unsigned(n, d, __mn_hist, __mn_scratch)
+    delocal int d = 0
+
+// `%-Nx` runtime: __mn_putx poi (N - hex_digits) spazi a destra.
+procedure __mn_putx_width_left(int n, int width, stack __mn_hist, stack __mn_scratch)
+    local int d = 0
+    call __mn_hcount_unsigned(n, d, __mn_hist, __mn_scratch)
+    local int pad = 0
+    pad += width
+    pad -= d
+    call __mn_putx(n, __mn_hist, __mn_scratch)
+    local int zp = 0
+    if pad > zp then
+        call __mn_emit_spaces(pad, __mn_hist, __mn_scratch)
+    fi pad > zp
+    delocal int zp = 0
+    pad += d
+    pad -= width
+    delocal int pad = 0
+    uncall __mn_hcount_unsigned(n, d, __mn_hist, __mn_scratch)
+    delocal int d = 0
+
+// `%0Nx` runtime: emette (N - hex_digits) zeri ASCII, poi __mn_putx.
+procedure __mn_putx_width_zero(int n, int width, stack __mn_hist, stack __mn_scratch)
+    local int d = 0
+    call __mn_hcount_unsigned(n, d, __mn_hist, __mn_scratch)
+    local int pad = 0
+    pad += width
+    pad -= d
+    local int zp = 0
+    if pad > zp then
+        call __mn_emit_zeros(pad, __mn_hist, __mn_scratch)
+    fi pad > zp
+    delocal int zp = 0
+    call __mn_putx(n, __mn_hist, __mn_scratch)
+    pad += d
+    pad -= width
+    delocal int pad = 0
+    uncall __mn_hcount_unsigned(n, d, __mn_hist, __mn_scratch)
+    delocal int d = 0
+
+// Split u64 hi/lo (bit 32-63 / 0-31) di un cell a 64 bit, puro (nessun
+// opcode nativo — era MNSPLIT32 O(1) host C, ora __mn_divmod_nonneg_fast
+// contro 2^32, O(32) iterazioni via raddoppio puro). Forward azzera src
+// (consumato, come il contratto nativo originale); inverse (uncall)
+// ripristina src e azzera hi/lo.
+// x >= 0: divmod diretta contro 2^32. x < 0 (high bit set = valore unsigned
+// grande in complemento a 2, x_u = x + 2^64): ab = |x| (negazione sicura
+// salvo x == INT64_MIN, caso limite gestito a parte — stessa cautela di
+// __mn_uhalve64 in bits.kairos), qab = ab/2^32, rab = ab%2^32:
+//   lo = (rab==0) ? 0 : (2^32 - rab);  hi = 2^32 - qab - (rab==0 ? 0 : 1)
+// (qui il modulo è 2^32, non 2^63: hi resta sempre < 2^32, ben dentro il
+// range int64 positivo — nessun accorgimento extra per overflow intermedi,
+// a differenza di __mn_uhalve64).
+procedure __mn_u64_split32(int src, int hi, int lo, stack __mn_hist, stack __mn_scratch)
+    local int xorig = 0
+    xorig += src
+    local int mod32 = 1
+    local int i = 0
+    from i == 0 do
+        local int m2 = 0
+        m2 += mod32
+        m2 += mod32
+        push(mod32, __mn_hist)
+        call __mn_move_int(mod32, m2, __mn_hist, __mn_scratch)
+        push(m2, __mn_hist)
+        delocal int m2 = 0
+        i += 1
+    loop until i == 32
+    local int min64 = 0
+    min64 -= 1
+    local int j = 0
+    from j == 0 do
+        local int m2b = 0
+        m2b += min64
+        m2b += min64
+        push(min64, __mn_hist)
+        call __mn_move_int(min64, m2b, __mn_hist, __mn_scratch)
+        push(m2b, __mn_hist)
+        delocal int m2b = 0
+        j += 1
+    loop until j == 63
+    local int is_min = 0
+    if xorig == min64 then
+        is_min += 1
+    fi xorig == min64
+    if is_min == 1 then
+        // src = INT64_MIN: x_u = 2^63 esatto. hi = 2^31, lo = 0.
+        local int p31 = 1
+        local int k = 0
+        from k == 0 do
+            local int p2 = 0
+            p2 += p31
+            p2 += p31
+            push(p31, __mn_hist)
+            call __mn_move_int(p31, p2, __mn_hist, __mn_scratch)
+            push(p2, __mn_hist)
+            delocal int p2 = 0
+            k += 1
+        loop until k == 31
+        hi += p31
+        push(k, __mn_hist)
+        delocal int k = 0
+        push(p31, __mn_hist)
+        delocal int p31 = 0
+    else
+        local int neg = 0
+        if xorig < 0 then
+            neg += 1
+        fi xorig < 0
+        local int ab = 0
+        if neg == 1 then
+            ab -= xorig
+        else
+            ab += xorig
+        fi neg == 1
+        local int qab = 0
+        local int rab = 0
+        call __mn_divmod_nonneg_fast(ab, mod32, qab, rab, __mn_hist, __mn_scratch)
+        if neg == 1 then
+            local int rz = 0
+            if rab == 0 then
+                rz += 1
+            fi rab == 0
+            if rz == 0 then
+                lo += mod32
+                lo -= rab
+                hi += mod32
+                hi -= qab
+                hi -= 1
+            else
+                hi += mod32
+                hi -= qab
+            fi rz == 0
+            push(rz, __mn_hist)
+            delocal int rz = 0
+        else
+            lo += rab
+            hi += qab
+        fi neg == 1
+        uncall __mn_divmod_nonneg_fast(ab, mod32, qab, rab, __mn_hist, __mn_scratch)
+        delocal int rab = 0
+        delocal int qab = 0
+        if neg == 1 then
+            ab += xorig
+        else
+            ab -= xorig
+        fi neg == 1
+        delocal int ab = 0
+        push(neg, __mn_hist)
+        delocal int neg = 0
+    fi is_min == 1
+    push(is_min, __mn_hist)
+    delocal int is_min = 0
+    // Consuma src (mnsplit32 lo azzerava nativamente).
+    local int sink = 0
+    call __mn_move_int(sink, src, __mn_hist, __mn_scratch)
+    push(sink, __mn_hist)
+    delocal int sink = 0
+    push(j, __mn_hist)
+    delocal int j = 0
+    push(min64, __mn_hist)
+    delocal int min64 = 0
+    push(i, __mn_hist)
+    delocal int i = 0
+    push(mod32, __mn_hist)
+    delocal int mod32 = 0
+    push(xorig, __mn_hist)
+    delocal int xorig = 0
+
+// Stampa intero u64 in esadecimale lowercase, no leading zeros.
+// Per cell >= 2^32 oppure cell < 0 (high bit set in signed int64), serve
+// gestione esplicita: __mn_putx_uint riceve solo nonneg fino a ~2^31.
+// Split: hi = bits 32-63 (u64), lo = bits 0-31. Se hi==0, print lo. Else
+// print hi poi lo padded a 8 cifre.
+procedure __mn_putx_u64(int n, stack __mn_hist, stack __mn_scratch)
+    local int hi = 0
+    local int lo = 0
+    call __mn_u64_split32(n, hi, lo, __mn_hist, __mn_scratch)
+    local int z = 0
+    if hi > z then
+        call __mn_putx_uint(hi, __mn_hist, __mn_scratch)
+        local int eight = 0
+        eight += 8
+        call __mn_putx_width_zero(lo, eight, __mn_hist, __mn_scratch)
+        eight -= 8
+        delocal int eight = 0
+    else
+        call __mn_putx_uint(lo, __mn_hist, __mn_scratch)
+    fi hi > z
+    delocal int z = 0
+    uncall __mn_u64_split32(n, hi, lo, __mn_hist, __mn_scratch)
+    delocal int lo = 0
+    delocal int hi = 0
+
+// ===== Variante UPPERCASE (%X / %llX): identica a putx ma cifre A-F (+55). =====
+procedure __mn_putX_uint(int n, stack __mn_hist, stack __mn_scratch)
+    local int base = 0
+    base += 16
+    local int qu = 0
+    local int rem = 0
+    if n >= base then
+        call __mn_divmod_nonneg_fast(n, base, qu, rem, __mn_hist, __mn_scratch)
+        call __mn_putX_uint(qu, __mn_hist, __mn_scratch)
+        local int ch = 0
+        local int ten = 0
+        ten += 10
+        if rem >= ten then
+            ch += rem
+            ch += 55
+            show(ch, char)
+            ch -= 55
+            ch -= rem
+        else
+            ch += rem
+            ch += 48
+            show(ch, char)
+            ch -= 48
+            ch -= rem
+        fi rem >= ten
+        ten -= 10
+        delocal int ten = 0
+        delocal int ch = 0
+        uncall __mn_divmod_nonneg_fast(n, base, qu, rem, __mn_hist, __mn_scratch)
+    else
+        local int ch = 0
+        local int ten = 0
+        ten += 10
+        if n >= ten then
+            ch += n
+            ch += 55
+            show(ch, char)
+            ch -= 55
+            ch -= n
+        else
+            ch += n
+            ch += 48
+            show(ch, char)
+            ch -= 48
+            ch -= n
+        fi n >= ten
+        ten -= 10
+        delocal int ten = 0
+        delocal int ch = 0
+    fi n >= base
+    base -= 16
+    delocal int rem = 0
+    delocal int qu = 0
+    delocal int base = 0
+
+procedure __mn_putX(int n, stack __mn_hist, stack __mn_scratch)
+    call __mn_putX_uint(n, __mn_hist, __mn_scratch)
+
+// `%0NX` uppercase: (N - hex_digits) zeri poi __mn_putX.
+procedure __mn_putX_width_zero(int n, int width, stack __mn_hist, stack __mn_scratch)
+    local int d = 0
+    call __mn_hcount_unsigned(n, d, __mn_hist, __mn_scratch)
+    local int pad = 0
+    pad += width
+    pad -= d
+    local int zp = 0
+    if pad > zp then
+        call __mn_emit_zeros(pad, __mn_hist, __mn_scratch)
+    fi pad > zp
+    delocal int zp = 0
+    call __mn_putX(n, __mn_hist, __mn_scratch)
+    pad += d
+    pad -= width
+    delocal int pad = 0
+    uncall __mn_hcount_unsigned(n, d, __mn_hist, __mn_scratch)
+    delocal int d = 0
+
+// `%NX` uppercase: (N - hex_digits) spazi poi __mn_putX.
+procedure __mn_putX_width(int n, int width, stack __mn_hist, stack __mn_scratch)
+    local int d = 0
+    call __mn_hcount_unsigned(n, d, __mn_hist, __mn_scratch)
+    local int pad = 0
+    pad += width
+    pad -= d
+    local int zp = 0
+    if pad > zp then
+        call __mn_emit_spaces(pad, __mn_hist, __mn_scratch)
+    fi pad > zp
+    delocal int zp = 0
+    call __mn_putX(n, __mn_hist, __mn_scratch)
+    pad += d
+    pad -= width
+    delocal int pad = 0
+    uncall __mn_hcount_unsigned(n, d, __mn_hist, __mn_scratch)
+    delocal int d = 0
+
+// u64 uppercase no leading zeros.
+procedure __mn_putX_u64(int n, stack __mn_hist, stack __mn_scratch)
+    local int hi = 0
+    local int lo = 0
+    call __mn_u64_split32(n, hi, lo, __mn_hist, __mn_scratch)
+    local int z = 0
+    if hi > z then
+        call __mn_putX_uint(hi, __mn_hist, __mn_scratch)
+        local int eight = 0
+        eight += 8
+        call __mn_putX_width_zero(lo, eight, __mn_hist, __mn_scratch)
+        eight -= 8
+        delocal int eight = 0
+    else
+        call __mn_putX_uint(lo, __mn_hist, __mn_scratch)
+    fi hi > z
+    delocal int z = 0
+    uncall __mn_u64_split32(n, hi, lo, __mn_hist, __mn_scratch)
+    delocal int lo = 0
+    delocal int hi = 0
+
+// `%0WllX` u64 uppercase zero-pad a W (W>=16: hi(8)+lo(8), + (W-16) zeri).
+procedure __mn_putX_u64_width_zero(int n, int width, stack __mn_hist, stack __mn_scratch)
+    local int hi = 0
+    local int lo = 0
+    call __mn_u64_split32(n, hi, lo, __mn_hist, __mn_scratch)
+    local int sixteen = 0
+    sixteen += 16
+    local int extra = 0
+    extra += width
+    extra -= sixteen
+    local int zp = 0
+    if extra > zp then
+        call __mn_emit_zeros(extra, __mn_hist, __mn_scratch)
+    fi extra > zp
+    extra -= width
+    extra += sixteen
+    delocal int zp = 0
+    delocal int extra = 0
+    sixteen -= 16
+    delocal int sixteen = 0
+    local int eight = 0
+    eight += 8
+    call __mn_putX_width_zero(hi, eight, __mn_hist, __mn_scratch)
+    call __mn_putX_width_zero(lo, eight, __mn_hist, __mn_scratch)
+    eight -= 8
+    delocal int eight = 0
+    uncall __mn_u64_split32(n, hi, lo, __mn_hist, __mn_scratch)
+    delocal int lo = 0
+    delocal int hi = 0

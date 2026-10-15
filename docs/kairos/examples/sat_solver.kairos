@@ -1,0 +1,180 @@
+// SAT: (x OR y) AND (!x OR z) AND (y OR !z). x,y,z = -1 unassigned, 0/1 assigned.
+// solve_branch: assigns a bit; leaf solve_leaf; ssend. Parallel search on x (par/rap).
+// y/z: solve_depth1/2 + solve_branch_acc (+ merge_or). Every intermediate result
+// is undone with uncall, so the whole program is reversible.
+
+procedure solve_branch(channel out, int level, int x, int y, int z, int bit)
+    local int cx = x
+    local int cy = y
+    local int cz = z
+    call set_bit(level, x, y, z, cx, cy, cz, bit)
+    local int res = 0
+    if level == 2 then
+        call solve_leaf(cx, cy, cz, res)
+    fi level == 2
+    if level == 0 then
+        call solve_depth1(cx, cy, cz, res)
+    fi level == 0
+    if level == 1 then
+        call solve_depth2(cx, cy, cz, res)
+    fi level == 1
+    ssend(<res>, out)
+    delocal int res = 0
+    uncall set_bit(level, x, y, z, cx, cy, cz, bit)
+    delocal int cz = z
+    delocal int cy = y
+    delocal int cx = x
+
+// Replaces the variable of this level (x, y or z) with the chosen bit.
+procedure set_bit(int level, int x, int y, int z, int cx, int cy, int cz, int bit)
+    if level == 0 then
+        cx -= x
+        cx += bit
+    fi level == 0
+    if level == 1 then
+        cy -= y
+        cy += bit
+    fi level == 1
+    if level == 2 then
+        cz -= z
+        cz += bit
+    fi level == 2
+
+// Level y: like solve_branch, but the result goes into int acc (no channel).
+procedure solve_branch_acc(int acc, int level, int x, int y, int z, int bit)
+    local int cx = x
+    local int cy = y
+    local int cz = z
+    call set_bit(level, x, y, z, cx, cy, cz, bit)
+    call solve_depth2(cx, cy, cz, acc)
+    uncall set_bit(level, x, y, z, cx, cy, cz, bit)
+    delocal int cz = z
+    delocal int cy = y
+    delocal int cx = x
+
+// Level z (leaf): a separate procedure, so solve_branch_acc does not call itself.
+procedure solve_branch_acc_z(int acc, int x, int y, int z, int bit)
+    local int cz = z
+    cz -= z
+    cz += bit
+    call solve_leaf(x, y, cz, acc)
+    cz -= bit
+    cz += z
+    delocal int cz = z
+
+procedure recv_pair(channel ch0, channel ch1, int r0, int r1)
+    srecv(<r0>, ch0)
+    srecv(<r1>, ch1)
+
+procedure merge_or(int r0, int r1, int result)
+    if r0 == 1 then
+        result += 1
+    else
+        if r1 == 1 then
+            result += 1
+        fi r1 == 1
+    fi r0 == 1
+
+// SAT leaf: evaluates the formula on the complete assignment.
+procedure solve_leaf(int x, int y, int z, int result)
+    if y == 1 then
+        if x == 0 then
+            result += 1
+        fi x == 0
+        if x == 1 then
+            if z == 1 then
+                result += 1
+            fi z == 1
+        fi x == 1
+    fi y == 1
+
+// Each level computes the two sub-results, ORs them into `result`, then
+// undoes them with uncall (Bennett's trick): r0 and r1 go back to zero and nothing is lost.
+procedure solve_depth2(int x, int y, int z, int result)
+    local int b0 = 0
+    local int b1 = 1
+    local int r0 = 0
+    local int r1 = 0
+    call solve_branch_acc_z(r0, x, y, z, b0)
+    call solve_branch_acc_z(r1, x, y, z, b1)
+    call merge_or(r0, r1, result)
+    uncall solve_branch_acc_z(r1, x, y, z, b1)
+    uncall solve_branch_acc_z(r0, x, y, z, b0)
+    delocal int r1 = 0
+    delocal int r0 = 0
+    delocal int b1 = 1
+    delocal int b0 = 0
+
+procedure solve_depth1(int x, int y, int z, int result)
+    local int b0 = 0
+    local int b1 = 1
+    local int r0 = 0
+    local int r1 = 0
+    local int lv1 = 1
+    call solve_branch_acc(r0, lv1, x, y, z, b0)
+    call solve_branch_acc(r1, lv1, x, y, z, b1)
+    call merge_or(r0, r1, result)
+    uncall solve_branch_acc(r1, lv1, x, y, z, b1)
+    uncall solve_branch_acc(r0, lv1, x, y, z, b0)
+    delocal int lv1 = 1
+    delocal int r1 = 0
+    delocal int r0 = 0
+    delocal int b1 = 1
+    delocal int b0 = 0
+
+// Parallel search on x: two branches try x=0 and x=1 and send their
+// result; the third branch receives them in r0 and r1.
+procedure search(int x, int y, int z, int r0, int r1)
+    local channel ch0 = empty
+    local channel ch1 = empty
+    local int b0 = 0
+    local int b1 = 1
+    local int lv0 = 0
+    local int lv1 = 0
+    local int x0 = x
+    local int y0 = y
+    local int z0 = z
+    local int x1 = x
+    local int y1 = y
+    local int z1 = z
+    par
+        call solve_branch(ch0, lv0, x0, y0, z0, b0)
+    and
+        call solve_branch(ch1, lv1, x1, y1, z1, b1)
+    and
+        call recv_pair(ch0, ch1, r0, r1)
+    rap
+    delocal int z1 = z
+    delocal int y1 = y
+    delocal int x1 = x
+    delocal int z0 = z
+    delocal int y0 = y
+    delocal int x0 = x
+    delocal int lv1 = 0
+    delocal int lv0 = 0
+    delocal int b1 = 1
+    delocal int b0 = 0
+    delocal channel ch1 = empty
+    delocal channel ch0 = empty
+
+procedure solve_main(int x, int y, int z, int result)
+    local int r0 = 0
+    local int r1 = 0
+    call search(x, y, z, r0, r1)
+    call merge_or(r0, r1, result)
+    uncall search(x, y, z, r0, r1)
+    delocal int r1 = 0
+    delocal int r0 = 0
+
+procedure main()
+    local int x = -1
+    local int y = -1
+    local int z = -1
+    local int result = 0
+    call solve_main(x, y, z, result)
+    show(result)             // expected: 1 (satisfiable)
+    uncall solve_main(x, y, z, result)
+    delocal int result = 0
+    delocal int z = -1
+    delocal int y = -1
+    delocal int x = -1
