@@ -1,0 +1,73 @@
+name: Update playgrounds
+
+# Rebuilds the in-browser Kairos and Mnemo playgrounds (VM compiled to
+# WebAssembly + Python frontends) from the latest kairos and mnemo repos and
+# commits the result. Run it by hand from the Actions tab after changing
+# either project. See /docs/playground-update/ for the manual procedure.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: update-playgrounds
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # The build scripts expect the three repos side by side.
+      - uses: actions/checkout@v4
+        with:
+          path: site
+
+      - uses: actions/checkout@v4
+        with:
+          repository: nicologiuliani6/kairos
+          path: kairos
+
+      - uses: actions/checkout@v4
+        with:
+          repository: nicologiuliani6/mnemo
+          path: mnemo
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # The scripts take PLY and pip from kairos/venv.
+      - name: Create the Kairos venv
+        run: |
+          python -m venv kairos/venv
+          kairos/venv/bin/pip install -q ply
+
+      - name: Rebuild the playgrounds
+        run: site/tools/update-playgrounds.sh kairos mnemo
+
+      - name: Commit and push
+        working-directory: site
+        run: |
+          K="$(git -C ../kairos rev-parse --short HEAD)"
+          M="$(git -C ../mnemo rev-parse --short HEAD)"
+          git config user.name "Nicolò Giuliani"
+          git config user.email "me@nicologiuliani.site"
+          git add docs/kairos docs/mnemo
+          if git diff --cached --quiet; then
+            echo "playgrounds already up to date"
+            exit 0
+          fi
+          git commit -m "playgrounds: update to kairos $K, mnemo $M"
+          git push
+
+      # Pushes made with GITHUB_TOKEN do not start the Pages build on their own.
+      - name: Request a Pages build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X POST "repos/${{ github.repository }}/pages/builds" || true
