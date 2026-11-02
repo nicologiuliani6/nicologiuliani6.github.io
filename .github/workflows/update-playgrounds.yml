@@ -1,10 +1,14 @@
 name: Update playgrounds
 
 # Rebuilds the in-browser Kairos and Mnemo playgrounds (VM compiled to
-# WebAssembly + Python frontends) from the latest kairos and mnemo repos and
-# commits the result. Run it by hand from the Actions tab after changing
-# either project. See /docs/playground-update/ for the manual procedure.
+# WebAssembly + Python frontends) from the latest GitHub release of kairos and
+# mnemo, and commits the result. Every 30 minutes it compares those releases
+# with .github/playground-versions.txt and stops at once if nothing changed.
+# It can also be run by hand from the Actions tab (it then always rebuilds).
+# See /docs/playground-update/ for the manual procedure.
 on:
+  schedule:
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -24,50 +28,86 @@ jobs:
         with:
           path: site
 
+      # Tags are compared by commit, so a release whose tag was moved counts too.
+      - name: Find the latest releases
+        id: rel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          line() {
+            local tag sha
+            tag="$(gh api "repos/nicologiuliani6/$1/releases/latest" -q .tag_name)"
+            sha="$(gh api "repos/nicologiuliani6/$1/commits/$tag" -q .sha)"
+            echo "$1_tag=$tag" >> "$GITHUB_OUTPUT"
+            echo "$1 $tag $sha"
+          }
+          { line kairos; line mnemo; } > versions.txt
+          cat versions.txt
+          if [ "${{ github.event_name }}" = schedule ] \
+             && cmp -s versions.txt site/.github/playground-versions.txt; then
+            echo "playgrounds already built from these releases"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.rel.outputs.changed == 'true'
         with:
           repository: nicologiuliani6/kairos
+          ref: ${{ steps.rel.outputs.kairos_tag }}
           path: kairos
 
       - uses: actions/checkout@v4
+        if: steps.rel.outputs.changed == 'true'
         with:
           repository: nicologiuliani6/mnemo
+          ref: ${{ steps.rel.outputs.mnemo_tag }}
           path: mnemo
 
       - uses: mymindstorm/setup-emsdk@v14
+        if: steps.rel.outputs.changed == 'true'
         with:
           version: latest
 
       - uses: actions/setup-python@v5
+        if: steps.rel.outputs.changed == 'true'
         with:
           python-version: '3.12'
 
       # The scripts take PLY and pip from kairos/venv.
       - name: Create the Kairos venv
+        if: steps.rel.outputs.changed == 'true'
         run: |
           python -m venv kairos/venv
           kairos/venv/bin/pip install -q ply
 
       - name: Rebuild the playgrounds
+        if: steps.rel.outputs.changed == 'true'
         run: site/tools/update-playgrounds.sh kairos mnemo
 
       - name: Commit and push
+        id: push
+        if: steps.rel.outputs.changed == 'true'
         working-directory: site
         run: |
-          K="$(git -C ../kairos rev-parse --short HEAD)"
-          M="$(git -C ../mnemo rev-parse --short HEAD)"
+          K="${{ steps.rel.outputs.kairos_tag }} ($(git -C ../kairos rev-parse --short HEAD))"
+          M="${{ steps.rel.outputs.mnemo_tag }} ($(git -C ../mnemo rev-parse --short HEAD))"
+          cp ../versions.txt .github/playground-versions.txt
           git config user.name "Nicolò Giuliani"
           git config user.email "me@nicologiuliani.site"
-          git add docs/kairos docs/mnemo
+          git add docs/kairos docs/mnemo .github/playground-versions.txt
           if git diff --cached --quiet; then
             echo "playgrounds already up to date"
             exit 0
           fi
           git commit -m "playgrounds: update to kairos $K, mnemo $M"
           git push
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
 
       # Pushes made with GITHUB_TOKEN do not start the Pages build on their own.
       - name: Request a Pages build
+        if: steps.push.outputs.pushed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh api -X POST "repos/${{ github.repository }}/pages/builds" || true

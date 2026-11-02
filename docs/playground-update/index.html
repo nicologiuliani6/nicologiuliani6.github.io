@@ -33,6 +33,15 @@
       bisogna rigenerare la copia e fare commit.
     </p>
 
+    <p>
+      <strong>Di solito non serve fare niente:</strong> il workflow GitHub
+      <code>.github/workflows/update-playgrounds.yml</code> controlla ogni 30 minuti l'ultima release
+      di Kairos e di Mnemo e, se è cambiata, rifà la build da quei tag, fa commit e pubblica. Le
+      release da cui è stato costruito il playground sono in <code>.github/playground-versions.txt</code>.
+      Per forzare una build: <code>gh workflow run update-playgrounds.yml</code>. La procedura
+      sotto serve per provare in locale o per pubblicare codice che non è ancora in una release.
+    </p>
+
     <h2 id="veloce">In breve</h2>
 
     <pre><code>cd ~/Desktop/nicologiuliani6.github.io
