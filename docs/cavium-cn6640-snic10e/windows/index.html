@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cavium CN6640-SNIC10E on Windows: octnic NDIS driver, install and usage</title>
+<meta name="description" content="A Windows 10/11 x64 NDIS miniport driver that exposes a Cavium CN6640-SNIC10E as two 10GbE adapters, with a one-click installer and automatic card boot.">
+<meta name="author" content="Nicolò Giuliani">
+<link rel="canonical" href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/windows/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Cavium CN6640-SNIC10E on Windows: octnic NDIS driver, install and usage">
+<meta property="og:description" content="A Windows 10/11 x64 NDIS miniport driver that exposes a Cavium CN6640-SNIC10E as two 10GbE adapters, with a one-click installer and automatic card boot.">
+<meta property="og:url" content="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/windows/">
+<meta property="og:image" content="https://nicologiuliani.site/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nicologiuliani.site/assets/og.png">
+<meta name="twitter:title" content="Cavium CN6640-SNIC10E on Windows: octnic NDIS driver, install and usage">
+<meta name="twitter:description" content="A Windows 10/11 x64 NDIS miniport driver that exposes a Cavium CN6640-SNIC10E as two 10GbE adapters, with a one-click installer and automatic card boot.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Cavium CN6640-SNIC10E on Windows",
+  "description": "Install and use the octnic Windows NDIS miniport driver for the Cavium CN6640-SNIC10E: installer, card boot, limitations.",
+  "url": "https://nicologiuliani.site/docs/cavium-cn6640-snic10e/windows/",
+  "author": { "@type": "Person", "name": "Nicolò Giuliani", "url": "https://nicologiuliani.site/" },
+  "about": ["Cavium CN6640", "OCTEON II", "Windows NDIS driver", "10 Gigabit Ethernet"]
+}
+</script>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<main>
+  <a class="back-link" href="/">← Home</a>
+
+  <header>
+    <h1>Cavium CN6640-SNIC10E</h1>
+    <p class="tagline">A Windows 10/11 x64 NDIS miniport: <code>oct0</code> and <code>oct1</code> in Device Manager and Network Connections.</p>
+    <nav class="os-tabs" aria-label="Operating system">
+      <a href="/docs/cavium-cn6640-snic10e/">General</a>
+      <a href="/docs/cavium-cn6640-snic10e/linux/">Linux</a>
+      <a href="/docs/cavium-cn6640-snic10e/windows/" aria-current="page">Windows</a>
+      <a href="/docs/cavium-cn6640-snic10e/freebsd/">FreeBSD (WIP)</a>
+    </nav>
+    <nav class="sub">
+      <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">Repository</a>
+      <a href="#install">Install</a>
+      <a href="#how-it-works">How it works</a>
+      <a href="#card-boot">Card boot</a>
+      <a href="#limitations">Limitations</a>
+      <a href="#usage">Usage</a>
+      <a href="/blog/cavium-cn6640-bar2-datapath/">The write-up</a>
+    </nav>
+  </header>
+
+  <article class="post-body">
+
+    <blockquote>
+      <p>
+        <strong>Status: working.</strong> Tested on real hardware with Windows 11 24H2 and a
+        test-signed driver: two NDIS adapters, DHCP, ping and internet through the card. The port
+        link follows the card's SFP+ link bit, so a port with no peer stays "Disconnected".
+        Not benchmarked on Windows yet.
+      </p>
+    </blockquote>
+
+    <p>
+      This is the Windows page of the <a href="/docs/cavium-cn6640-snic10e/">Cavium
+      CN6640-SNIC10E docs</a>. The overview, the FAQ and the list of reference documents are on
+      the general page. The driver is <code>octnic.sys</code>, an NDIS 6.20 miniport that speaks the
+      same BAR2 shared-memory protocol as the Linux driver. Windows 10/11 x64 is the target;
+      Windows 11 24H2 is the only version tested so far.
+    </p>
+
+    <h2 id="requirements">Requirements</h2>
+
+    <ul>
+      <li>Windows 10/11 x64, with the card in a PCIe slot.</li>
+      <li><strong>Secure Boot off</strong>: the driver is test-signed, and test-signing cannot be
+        enabled with Secure Boot on.</li>
+      <li>The card image, which the boot task downloads once from the latest release into
+        <code>C:\ProgramData\octnic</code>.</li>
+      <li>A USB-serial (FT232) adapter for the one-time u-boot provisioning, unless you do that
+        step from Linux (see <a href="#limitations">Limitations</a>).</li>
+    </ul>
+
+    <h2 id="install">Install</h2>
+
+    <p>
+      Download <code>install_windows.bat</code> (and <code>octnic-windows-x64.zip</code>) from the
+      <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/releases/latest">latest release</a> and double-click it. It asks for
+      Administrator rights and then:
+    </p>
+
+    <ul>
+      <li>trusts the bundled test certificate, so there is no "install this driver?" popup;</li>
+      <li>enables test-signing if it is off (<code>bcdedit /set testsigning on</code>), reboots once
+        and resumes by itself;</li>
+      <li>installs the driver, creates the second port and names the NICs <code>oct0</code> and
+        <code>oct1</code>;</li>
+      <li>registers the boot task <code>octnic-boot</code> (SYSTEM, at every Windows start) that
+        boots the card, see <a href="#card-boot">Card boot</a>.</li>
+    </ul>
+
+    <p>
+      From a clone of the repository, <code>install.bat</code> at the root runs the same guided
+      flow as the other OSes (card present, driver, card provisioned, boot task), described on
+      the <a href="/docs/cavium-cn6640-snic10e/#install">general page</a>. Verify with:
+    </p>
+
+    <pre><code>Get-NetAdapter oct0, oct1</code></pre>
+
+    <p>
+      To uninstall: <code>pnputil /enum-drivers</code>, then
+      <code>pnputil /delete-driver oemNN.inf /uninstall</code>, then
+      <code>Unregister-ScheduledTask octnic-boot</code>.
+    </p>
+
+    <h2 id="how-it-works">How it works</h2>
+
+    <p>
+      The datapath is the Linux one. TX: the host writes frames straight into the BAR2 TX buffer
+      using write-combining memory, claiming slots with compare-and-swap so several TX queues can
+      run in parallel. RX: the card's DPI engine DMA-writes received frames into host RAM, with the
+      descriptors also in host RAM so there is no per-frame PCIe read, and several busy-poll
+      threads drain the ring in parallel.
+    </p>
+
+    <h3>Two NICs from one PCI function</h3>
+    <p>
+      One PCI function can bind only one NDIS adapter. So <strong>port 0</strong> is the PCI device
+      itself (<code>PCI\VEN_177D&amp;DEV_0092</code>), which owns the BAR2 mapping and the host DMA
+      memory, and <strong>port 1</strong> is a root-enumerated companion device
+      (<code>ROOT\OCTNIC_PORT1</code>, created by <code>octnic-addport.ps1</code>) that shares them.
+      Both are served by the same <code>octnic.sys</code>, and both show up in Device Manager and
+      under Network Connections.
+    </p>
+
+    <h2 id="card-boot">Card boot from Windows</h2>
+
+    <p>
+      The card's OpenWrt runs from RAM and must be pushed by the host after power-on.
+      <code>octboot.ps1</code> does what the Linux <code>octboot</code> does, through the driver's
+      control device <code>\\.\octnic</code> (Administrators and SYSTEM only): it waits for the BAR2
+      window, pushes the image with verification, starts the card and waits for its heartbeat. If
+      that fails it falls back to a secondary bus reset and retries.
+    </p>
+
+    <p>
+      <strong>It does nothing when the card OS is already up</strong>, so it never fights Linux on a
+      dual-boot machine or after a warm reboot. The boot task runs <code>octnic-start.ps1</code> at
+      every Windows start: it waits for the adapters, names them and runs
+      <code>octboot.ps1 -Download</code>.
+    </p>
+
+    <p>
+      Logs: <code>C:\ProgramData\octnic\start.log</code> and <code>octboot.log</code>; driver log:
+      <code>C:\Windows\octnic.log</code>. By hand, as Administrator:
+      <code>.\octboot.ps1 [-ImagePath file.bin] [-Force] [-Download]</code>. <code>-Probe</code>
+      prints the card state, and <code>-SbrOnly</code> resets the card.
+    </p>
+
+    <h2 id="limitations">Limitations</h2>
+
+    <ul>
+      <li><strong>Test-signed, not Microsoft-signed.</strong> That is why Secure Boot has to be off.
+        Production signing needs an EV code-signing certificate and a Windows Hardware Dev Center
+        account (attestation signing). <code>make-submission.ps1</code> builds the package for
+        upload, but that path is untested.</li>
+      <li><strong>No Windows benchmarks yet.</strong> The throughput on the
+        <a href="/docs/cavium-cn6640-snic10e/linux/#performance">Linux page</a> is measured on
+        Linux only.</li>
+      <li><strong>The serial provisioning step is untested on Windows.</strong>
+        <code>octnic-provision.ps1</code> is a port of the Linux script and has not been run on
+        real Windows hardware. If you have a Linux machine, do that one-time step there; after it,
+        the card boots without a serial cable from either OS.</li>
+      <li><strong>Only Windows 11 24H2 was tested.</strong></li>
+      <li><strong>Linux known issues carry over.</strong> The card can wedge under sustained
+        dual-port traffic, and recovery is a host reboot.</li>
+    </ul>
+
+    <h2 id="usage">Usage</h2>
+
+    <pre><code>Get-NetAdapter oct0, oct1                    # both NICs
+New-NetIPAddress -InterfaceAlias oct0 -IPAddress 10.9.9.1 -PrefixLength 24
+Set-NetIPInterface -InterfaceAlias oct1 -Dhcp Enabled</code></pre>
+
+    <p>
+      The driver has a watchdog on the card's heartbeat, its temperatures, the PCIe memory decode
+      and the SFP+ link, and logs alerts to the Windows Event Log under
+      <em>Application and Services Logs, octnic</em>. Tunables (RX threads, poll interval, TX
+      queues and so on) are registry values under
+      <code>HKLM\SYSTEM\CurrentControlSet\Services\octnic\Parameters</code>; the full list is in
+      <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/blob/main/winmod/README.md">winmod/README</a>.
+    </p>
+
+    <h3>Build from source</h3>
+    <p>
+      <code>build_local.bat</code> (Visual Studio Build Tools and WDK 10.0.26100) produces
+      <code>out\octnic.sys</code>, and <code>package.ps1</code> produces the test-signed
+      <code>dist\</code> package. CI builds on every push that touches <code>winmod/</code> and
+      attaches <code>octnic-windows-x64.zip</code> and <code>install_windows.bat</code> to every
+      release.
+    </p>
+
+    <h2 id="contact">Questions, or testing on your own board?</h2>
+
+    <p>
+      Open an
+      <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/issues">issue</a>
+      or a
+      <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/discussions">discussion</a>
+      on the repository, or email
+      <a href="mailto:me@nicologiuliani.site">me@nicologiuliani.site</a>.
+      Results from other boards are especially welcome: everything here was developed against a
+      single card.
+    </p>
+
+  </article>
+
+  <footer>GPL-2.0 · <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">source on GitHub</a> · <a href="/">nicologiuliani.site</a> · <a href="https://github.com/sponsors/nicologiuliani6">Sponsor</a></footer>
+</main>
+<script data-goatcounter="https://nicologiuliani.goatcounter.com/count"
+        async src="//gc.zgo.at/count.js"></script>
+</body>
+</html>

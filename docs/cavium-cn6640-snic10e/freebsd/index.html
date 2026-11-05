@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cavium CN6640-SNIC10E on FreeBSD (work in progress)</title>
+<meta name="description" content="Status and plan for a FreeBSD driver for the Cavium CN6640-SNIC10E. Nothing runs on BSD yet; this page tracks the planned design.">
+<meta name="author" content="Nicolò Giuliani">
+<link rel="canonical" href="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/freebsd/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Cavium CN6640-SNIC10E on FreeBSD (work in progress)">
+<meta property="og:description" content="Status and plan for a FreeBSD driver for the Cavium CN6640-SNIC10E. Nothing runs on BSD yet; this page tracks the planned design.">
+<meta property="og:url" content="https://nicologiuliani.site/docs/cavium-cn6640-snic10e/freebsd/">
+<meta property="og:image" content="https://nicologiuliani.site/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nicologiuliani.site/assets/og.png">
+<meta name="twitter:title" content="Cavium CN6640-SNIC10E on FreeBSD (work in progress)">
+<meta name="twitter:description" content="Status and plan for a FreeBSD driver for the Cavium CN6640-SNIC10E. Nothing runs on BSD yet; this page tracks the planned design.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "headline": "Cavium CN6640-SNIC10E on FreeBSD (work in progress)",
+  "description": "Status and plan for a FreeBSD driver for the Cavium CN6640-SNIC10E.",
+  "url": "https://nicologiuliani.site/docs/cavium-cn6640-snic10e/freebsd/",
+  "author": { "@type": "Person", "name": "Nicolò Giuliani", "url": "https://nicologiuliani.site/" },
+  "about": ["Cavium CN6640", "OCTEON II", "FreeBSD", "network driver"]
+}
+</script>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<main>
+  <a class="back-link" href="/">← Home</a>
+
+  <header>
+    <h1>Cavium CN6640-SNIC10E</h1>
+    <p class="tagline">Work in progress: a planned <code>ifnet</code> driver for the same BAR2 datapath. Nothing runs yet.</p>
+    <nav class="os-tabs" aria-label="Operating system">
+      <a href="/docs/cavium-cn6640-snic10e/">General</a>
+      <a href="/docs/cavium-cn6640-snic10e/linux/">Linux</a>
+      <a href="/docs/cavium-cn6640-snic10e/windows/">Windows</a>
+      <a href="/docs/cavium-cn6640-snic10e/freebsd/" aria-current="page">FreeBSD (WIP)</a>
+    </nav>
+    <nav class="sub">
+      <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">Repository</a>
+      <a href="#plan">Plan</a>
+      <a href="/blog/cavium-cn6640-bar2-datapath/">The write-up</a>
+    </nav>
+  </header>
+
+  <article class="post-body">
+
+    <blockquote>
+      <p>
+        <strong>Status: work in progress, not implemented.</strong> There is no BSD driver today.
+        The <code>bsdmod/</code> directory in the repository only holds the plan, and the
+        installer cancels on FreeBSD, OpenBSD, NetBSD and DragonFly with a message saying so.
+      </p>
+    </blockquote>
+
+    <p>
+      This is the FreeBSD page of the <a href="/docs/cavium-cn6640-snic10e/">Cavium CN6640-SNIC10E
+      docs</a>. It exists so the status is written down in one place. Linux and Windows are the
+      supported systems: see the <a href="/docs/cavium-cn6640-snic10e/linux/">Linux</a> and
+      <a href="/docs/cavium-cn6640-snic10e/windows/">Windows</a> pages.
+    </p>
+
+    <h2 id="plan">Plan</h2>
+
+    <p>
+      The BSD driver would follow the same shared-memory BAR2 protocol as the Linux and Windows
+      drivers, so the card side (the OpenWrt image and its <code>octshm_card</code> module) stays
+      exactly as it is. Only the host driver is new: an <code>if_octnic</code> network interface
+      that registers <code>oct0</code> and <code>oct1</code>.
+    </p>
+
+    <h3>Phase 1: framework</h3>
+    <ul>
+      <li><code>if_octnic</code>, a BSD network interface driver.</li>
+      <li>BAR2 access through the <code>bus_space</code> API.</li>
+      <li>Integration with the FreeBSD network stack, with mbuf-based packet handling in place of
+        the Linux <code>sk_buff</code> and the Windows net buffers.</li>
+    </ul>
+
+    <h3>Phase 2: features</h3>
+    <ul>
+      <li>Multi-queue support.</li>
+      <li>DMA mode for the card-to-host path (DPI).</li>
+      <li>Zero-copy TX, as on Linux.</li>
+      <li>Card temperatures through <code>sysctl</code>.</li>
+    </ul>
+
+    <p>
+      None of these items is started. The plan, as written in the repository, is in
+      <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/blob/main/bsdmod/README.md">bsdmod/README</a>; the same placeholder covers OpenBSD and
+      DragonFly BSD.
+    </p>
+
+    <h2 id="contact">Questions, or want to follow or help?</h2>
+
+    <p>
+      Open an
+      <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/issues">issue</a>
+      or a
+      <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic/discussions">discussion</a>
+      on the repository, or email
+      <a href="mailto:me@nicologiuliani.site">me@nicologiuliani.site</a>.
+      Nothing is started on the BSD side yet, so a discussion is the best way to follow the port
+      or to offer help.
+    </p>
+
+  </article>
+
+  <footer>GPL-2.0 · <a href="https://github.com/nicologiuliani6/cavium-cn6640-snic10e-octeon-ii-nic">source on GitHub</a> · <a href="/">nicologiuliani.site</a> · <a href="https://github.com/sponsors/nicologiuliani6">Sponsor</a></footer>
+</main>
+<script data-goatcounter="https://nicologiuliani.goatcounter.com/count"
+        async src="//gc.zgo.at/count.js"></script>
+</body>
+</html>
