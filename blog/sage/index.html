@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SAGE: CVE-driven patching for Kubernetes nodes, one node at a time</title>
+<meta name="description" content="SAGE, a patch management system for Kubernetes nodes: it checks whether each CVE really applies to each node, decides what to do and does it, one node at a time.">
+<meta name="author" content="Nicolò Giuliani">
+<link rel="canonical" href="https://nicologiuliani.site/blog/sage/">
+<meta property="og:type" content="article">
+<meta property="og:title" content="SAGE: CVE-driven patching for Kubernetes nodes, one node at a time">
+<meta property="og:description" content="A patch management system that asks, for every vulnerable package on every node, whether the CVE really applies, and verifies the answer on the node itself.">
+<meta property="og:url" content="https://nicologiuliani.site/blog/sage/">
+<meta property="og:image" content="https://nicologiuliani.site/blog/sage/panoramica.png">
+<meta property="article:published_time" content="2026-11-06">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://nicologiuliani.site/blog/sage/panoramica.png">
+<meta name="twitter:title" content="SAGE: CVE-driven patching for Kubernetes nodes, one node at a time">
+<meta name="twitter:description" content="A patch management system that asks, for every vulnerable package on every node, whether the CVE really applies, and verifies the answer on the node itself.">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "BlogPosting",
+  "headline": "SAGE: CVE-driven patching for Kubernetes nodes, one node at a time",
+  "datePublished": "2026-11-06",
+  "url": "https://nicologiuliani.site/blog/sage/",
+  "image": "https://nicologiuliani.site/blog/sage/panoramica.png",
+  "author": { "@type": "Person", "name": "Nicolò Giuliani", "url": "https://nicologiuliani.site/" }
+}
+</script>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<main>
+  <a class="back-link" href="/blog/">← Blog</a>
+
+  <header>
+    <h1>SAGE: CVE-driven patching for Kubernetes nodes, one node at a time</h1>
+    <p class="post-meta"><time datetime="2026-11-06">6 November 2026</time></p>
+  </header>
+
+  <article class="post-body">
+
+    <figure>
+      <img src="/blog/sage/panoramica.png" alt="SAGE dashboard overview: 5 of 5 nodes in a clean state, no serious CVEs open, no node in quarantine">
+      <figcaption>The SAGE dashboard on the test cluster after remediation: 5 nodes out of 5 clean, no serious CVE open, nothing in quarantine.</figcaption>
+    </figure>
+
+    <p>
+      SAGE (<em>SSVC-Aware Guarded Engine</em>) is a patch management system for the nodes of a
+      Kubernetes cluster. For every vulnerable package on every node it
+      asks one question, <em>"does this CVE really affect us?"</em>, then decides what to do and does
+      it, one node at a time.
+    </p>
+
+    <p>
+      Code, operations guide, architecture and every design decision are on GitHub:
+      <a href="https://github.com/nicologiuliani6/sage">github.com/nicologiuliani6/sage</a>.
+    </p>
+
+    <h2>The problem</h2>
+
+    <p>
+      Before writing any code, I built a test cluster on an OpenStack cloud: 1 master and 3 workers
+      on Rocky Linux 9.4, provisioned with Terraform and installed with kubespray. A freshly installed cluster, nothing exotic on it. Running
+      <code>dnf updateinfo</code> on the nodes reported <strong>308 security advisories across 147
+      packages</strong>.
+    </p>
+
+    <p>
+      That number is the whole problem. Scanners flag a CVE as soon as a vulnerable package is
+      installed, but many vulnerabilities only matter under conditions that may not exist on the
+      node: a kernel module that has to be loaded, a service that has to be listening, a component
+      that has to actually be in use. You are left with two bad options:
+    </p>
+
+    <ul>
+      <li><strong>Update everything, blindly.</strong> Reboots, drained nodes and regressions, for
+      CVEs that might not apply at all.</li>
+      <li><strong>Ignore what looks irrelevant.</strong> Fine until one of those "irrelevant" CVEs
+      turns out to be exploitable on your hardware.</li>
+    </ul>
+
+    <p>SAGE takes a third option: decide case by case, with evidence, and keep the evidence.</p>
+
+    <h2>What it decides</h2>
+
+    <table>
+      <thead><tr><th>Action</th><th>When</th></tr></thead>
+      <tbody>
+        <tr><td><code>update</code></td><td>the CVE applies, <em>or there is any doubt</em></td></tr>
+        <tr><td><code>not_affected</code></td><td>the CVE does not apply, <strong>verified on the node</strong>: no update, a VEX document is written instead</td></tr>
+        <tr><td><code>mitigate</code></td><td>what makes it exploitable can be switched off, for example by blocking a kernel module</td></tr>
+        <tr><td><code>remove</code></td><td>the package has been unused for days and nothing needs it</td></tr>
+        <tr><td><code>skip</code></td><td>the node is not in any configured group, so it is not touched</td></tr>
+      </tbody>
+    </table>
+
+    <h2>How it works</h2>
+
+    <ol>
+      <li><strong>Deterministic collection.</strong> A Kubernetes Job connects to every node over
+      SSH with Ansible and collects facts: installed packages, security advisories, loaded kernel
+      modules, listening services, running processes.</li>
+      <li><strong>Public threat data.</strong> Each CVE is enriched with the CISA KEV catalog (is it
+      being exploited in the wild?), the FIRST EPSS score (how likely is exploitation?) and the
+      official CVE record with CISA's SSVC assessment.</li>
+      <li><strong>The LLM as an extractor, nothing more.</strong> A language model reads only the
+      public description of the CVE and the package name, never data from the nodes, and lists the
+      conditions the vulnerability needs. It must pick them from a closed catalog
+      (<code>kernel_module</code>, <code>network_service</code>, <code>component_in_use</code>); answers
+      are validated against a schema and cached.</li>
+      <li><strong>Verification on the real node.</strong> Every condition is checked against the
+      collected facts, with consistency checks. A condition that cannot be verified counts as
+      true. The model can never declare a node safe on its own word.</li>
+      <li><strong>Decision by policy, not by the model.</strong> An OPA policy written in Rego picks
+      the action. Two rules are fixed and cannot be configured away: <em>when in doubt, update</em>,
+      and <em>a CVE in the KEV catalog is never "not affected"</em>.</li>
+      <li><strong>Remediation, one node at a time.</strong> Groups go in order (workers first,
+      masters last), a canary node goes first, and a node is never patched by a Job running on
+      itself. Each node goes through cordon, drain, updating only the advisories that are needed,
+      reboot if required, health checks, uncordon. If anything fails, the node is rolled back and
+      put in quarantine, and SAGE stops until a person looks at it.</li>
+      <li><strong>Report.</strong> A plan per node and an OpenVEX document for every CVE that was
+      declared not affected, with the evidence behind it.</li>
+    </ol>
+
+    <p>
+      An always-on controller (a Deployment holding a Lease, so only one copy is ever active)
+      loops over the nodes and hands the heavy work to Jobs. If the LLM is unreachable, SAGE falls
+      back through a chain of endpoints, and with no model at all it keeps working on the
+      deterministic rules alone.
+    </p>
+
+    <h2>No data leaves the cluster</h2>
+
+    <p>
+      I prototyped the extraction step with a hosted model, then moved it inside the
+      infrastructure: a dedicated node in the cluster serves an 8B model with Ollama, on CPU only.
+      For this job, reading a CVE description and naming the conditions it needs, a small local
+      model turned out to do very well. The prompt only ever contains public CVE data, and now even
+      that never leaves the cluster.
+    </p>
+
+    <h2>On the test cluster</h2>
+
+    <p>
+      At the first check, all four nodes were critical, with 8 CVEs from the KEV catalog still
+      open and the update waves ready: workers with a canary first, then the master.
+    </p>
+
+    <figure>
+      <img src="/blog/sage/primo-controllo.png" alt="First check: four critical nodes and 8 open KEV CVEs, with the update waves waiting">
+      <figcaption>First check: four critical nodes, 8 actively exploited CVEs (KEV) to fix, waves waiting with the canary first.</figcaption>
+    </figure>
+
+    <p>Then SAGE worked through the nodes, one at a time.</p>
+
+    <figure>
+      <img src="/blog/sage/remediation-in-corso.png" alt="Remediation in progress: three nodes already clean, the canary still being processed">
+      <figcaption>Remediation in progress: three nodes already clean, one still being patched.</figcaption>
+    </figure>
+
+    <figure>
+      <img src="/blog/sage/log.png" alt="Log of a worker remediation: uncordon, system pod checks and an Ansible recap with no failures">
+      <figcaption>The end of a worker's remediation: uncordon, check that the system pods are back, Ansible recap with zero failures.</figcaption>
+    </figure>
+
+    <p>
+      After more than 400 cycles, all five nodes, including the one running the LLM, are clean:
+      no KEV vulnerability open, no node in quarantine, no failed remediation.
+    </p>
+
+    <figure>
+      <img src="/blog/sage/nodi.png" alt="One card per node: three workers, the master and the LLM node, all clean">
+      <figcaption>One card per node, with every decision and its evidence: three workers, the master and the LLM node.</figcaption>
+    </figure>
+
+    <h2>Design rules</h2>
+
+    <ul>
+      <li><strong>When in doubt, update.</strong> It is a guarantee of the policy, not a setting.</li>
+      <li><strong>No hardcoding.</strong> Groups, SSH user, LLM endpoints, protected packages and
+      modules all come from configuration; a missing required field stops startup with a clear
+      error.</li>
+      <li><strong>SAGE does not depend on what it updates.</strong> One node at a time, never on
+      itself, and it keeps working without the LLM.</li>
+      <li><strong>Traceability.</strong> Every decision has its evidence, every configuration change
+      goes into a history with who, when and why.</li>
+      <li><strong>Free and open source components only</strong>, pinned by hash, SHA or digest.</li>
+      <li><strong>Every design choice is written down</strong> as an
+      <a href="https://github.com/nicologiuliani6/sage/tree/main/docs/adr">architecture decision record</a>.</li>
+    </ul>
+
+    <p>
+      It runs on RHEL-family nodes (dnf), SUSE (zypper), Debian and Ubuntu (apt), even mixed in
+      the same cluster, and installs from a single executable on a master that asks a few
+      questions and deploys everything with a Helm chart. A read-only web dashboard shows nodes,
+      CVEs, cycles, health, logs and history.
+    </p>
+
+    <h2>What's next</h2>
+
+    <ul>
+      <li>Two or three LLM nodes behind a single endpoint for high availability, still with all
+      data inside, and GPUs if they become available.</li>
+      <li>Deterministic applicability at the version level (Red Hat CSAF VEX) and at the kernel
+      configuration level.</li>
+      <li>A proper evaluation: updates and reboots avoided compared with <code>dnf-automatic</code>,
+      agreement with an expert's decisions, stability of the model's answers.</li>
+      <li>Testing on a cluster with 3 masters, then at scale.</li>
+    </ul>
+
+    <h2>Links</h2>
+
+    <ul>
+      <li><a href="https://github.com/nicologiuliani6/sage">Repository</a></li>
+      <li><a href="https://github.com/nicologiuliani6/sage/blob/main/docs/guida.md">Operations guide</a> (Italian)</li>
+      <li><a href="https://github.com/nicologiuliani6/sage/blob/main/docs/architecture.md">Architecture</a> (Italian)</li>
+      <li><a href="https://github.com/nicologiuliani6/sage/tree/main/docs/adr">Design decisions</a> (Italian)</li>
+    </ul>
+
+  </article>
+
+  <footer>nicologiuliani.site</footer>
+</main>
+<script data-goatcounter="https://nicologiuliani.goatcounter.com/count"
+        async src="//gc.zgo.at/count.js"></script>
+</body>
+</html>
